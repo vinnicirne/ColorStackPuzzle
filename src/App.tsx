@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX } from 'lucide-react';
 import { Color, BoardCell, Piece } from './types';
+import { AdMob, InterstitialAdPluginEvents } from '@capacitor-community/admob';
 
 const BOARD_SIZE = 8;
 const BASE_COLORS: Color[] = ['red', 'blue', 'green', 'yellow', 'purple'];
@@ -441,9 +442,28 @@ export default function App() {
     }
   };
 
-  const showAdAndRestart = () => {
-    setGameState('ad');
-    setTimeout(() => startNewGame(), 2500);
+  const showAdAndRestart = async () => {
+    const AD_UNIT_ID = 'ca-app-pub-2871403878275209/9050607747';
+    const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+
+    if (isNative) {
+      try {
+        await AdMob.initialize({ initializeForTesting: false });
+        await AdMob.prepareInterstitial({ adId: AD_UNIT_ID });
+        await AdMob.showInterstitial();
+        // Escuta o evento de fechamento do anúncio para reiniciar
+        AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+          startNewGame();
+        });
+      } catch {
+        // Se falhar (sem conectividade, etc.), reinicia direto
+        startNewGame();
+      }
+    } else {
+      // Fallback no browser: simula o anúncio
+      setGameState('ad');
+      setTimeout(() => startNewGame(), 2500);
+    }
   };
 
   const handleCellClick = (row: number, col: number) => {
