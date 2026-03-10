@@ -38,12 +38,12 @@ const SHAPES_BY_LEVEL = [
 ];
 
 const COLOR_MAP: Record<Color, string> = {
-  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_15px_rgba(244,63,94,0.4)]',
-  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-[0_0_15px_rgba(14,165,233,0.4)]',
-  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]',
-  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.4)]',
-  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[0_0_15px_rgba(139,92,246,0.4)]',
-  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[0_0_15px_rgba(249,115,22,0.4)]',
+  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-rose-500/50 shadow-md',
+  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-sky-500/50 shadow-md',
+  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-emerald-500/50 shadow-md',
+  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-amber-500/50 shadow-md',
+  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-fuchsia-500/50 shadow-md',
+  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-orange-500/50 shadow-md',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -371,6 +371,13 @@ export default function App() {
     });
 
     const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
+    
+    // Mostra a peça IMEDIATAMENTE no quadro para feedback instantâneo
+    setBoard(activeBoard);
+    setCurrentPieces(remainingPieces);
+    setSelectedPiece(null);
+    setDraggedPiece(null);
+
 
     // Função interna para rodar os ciclos de explosão/gravidade (Combo System)
     const runMatchCycle = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
@@ -458,12 +465,13 @@ export default function App() {
           ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
           : remainingPieces;
 
-        // Atualiza o estado final
-        setBoard(currentBoard);
+        // Atualiza o estado final (caso não tenha matches ou após o ciclo)
+        setBoard([...currentBoard]);
         setScore(currentScore);
         setCurrentPieces(finalPieces);
         setSelectedPiece(null);
         setDraggedPiece(null);
+
 
         // Se subiu de nível, processa agora
         if (currentLevel > level) {
@@ -851,7 +859,7 @@ export default function App() {
                     
                     const fits = canPlacePiece(activePiece!, anchorR, anchorC, board);
                     return (
-                      <div className={`absolute inset-0 rounded-lg ${COLOR_MAP[ghostBlock.color]} ${fits ? 'opacity-40 animate-pulse' : 'opacity-20 grayscale'}`} />
+                      <div className={`absolute inset-0 rounded-lg ${COLOR_MAP[ghostBlock.color]} ${fits ? 'opacity-40 animate-pulse' : 'opacity-20 grayscale'} pointer-events-none`} />
                     );
                   })()}
 
@@ -862,7 +870,7 @@ export default function App() {
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0, rotate: 45 }}
-                        className={`absolute inset-0 rounded-lg ${COLOR_MAP[cell.color]} relative overflow-hidden`}
+                        className={`absolute inset-0 rounded-lg ${COLOR_MAP[cell.color]} relative`}
                       >
                         {/* Brilho Glossy estilo Candy Crush */}
                         <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
