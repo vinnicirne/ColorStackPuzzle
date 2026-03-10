@@ -480,7 +480,8 @@ export default function App() {
 
   const handleCellClick = (row: number, col: number) => {
     if (selectedPiece) {
-      handlePiecePlacement(selectedPiece.piece, row, col, selectedPiece.index);
+      const fb = [...selectedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+      handlePiecePlacement(selectedPiece.piece, row - fb.x, col - fb.y, selectedPiece.index);
     }
   };
 
@@ -669,7 +670,11 @@ export default function App() {
       </div>
 
       {/* ─── TABULEIRO ─── */}
-      <div className="relative" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setHoverCell(null); }}>
+      <div
+        className="relative"
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setHoverCell(null); }}
+        onMouseLeave={() => { if (!draggedPiece) setHoverCell(null); }}
+      >
         <motion.div
           animate={isClearing ? { scale: [1, 1.02, 1] } : {}}
           transition={{ duration: 0.3 }}
@@ -693,11 +698,16 @@ export default function App() {
                   whileTap={{ scale: 0.92 }}
                   className={(() => {
                     const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    const activeRow = hoverCell?.r ?? (selectedPiece ? r : null);
-                    const activeCol = hoverCell?.c ?? (selectedPiece ? c : null);
+                    // Ancora no primeiro bloco visível (leitura: cima->baixo, esq->dir)
+                    // Garante que o cursor fica SOBRE um bloco real, não sobre espaço vazio
+                    const firstBlock = activePiece
+                      ? [...activePiece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0]
+                      : { x: 0, y: 0 };
+                    const anchorR = hoverCell ? hoverCell.r - firstBlock.x : -1;
+                    const anchorC = hoverCell ? hoverCell.c - firstBlock.y : -1;
                     const isGhost = activePiece && hoverCell &&
-                      activePiece.shape.some(({ x, y }) => hoverCell.r + x === r && hoverCell.c + y === c);
-                    const ghostFits = isGhost && canPlacePiece(activePiece!, hoverCell!.r, hoverCell!.c, board);
+                      activePiece.shape.some(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                    const ghostFits = isGhost && canPlacePiece(activePiece!, anchorR, anchorC, board);
                     const ghostBlocked = isGhost && !ghostFits;
                     return [
                       'relative rounded-lg aspect-square transition-all duration-100 cursor-pointer',
@@ -708,8 +718,15 @@ export default function App() {
                     ].join(' ');
                   })()}
                   onClick={() => handleCellClick(r, c)}
+                  onMouseEnter={() => setHoverCell({ r, c })}
                   onDragOver={(e) => { e.preventDefault(); setHoverCell({ r, c }); }}
-                  onDrop={() => { setHoverCell(null); draggedPiece && handlePiecePlacement(draggedPiece.piece, r, c, draggedPiece.index); }}
+                  onDrop={() => {
+                    setHoverCell(null);
+                    if (draggedPiece) {
+                      const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                      handlePiecePlacement(draggedPiece.piece, r - fb.x, c - fb.y, draggedPiece.index);
+                    }
+                  }}
                 >
                   <AnimatePresence>
                     {cell && (
@@ -827,7 +844,8 @@ export default function App() {
               onTouchEnd={() => {
                 const state = touchDragRef.current;
                 if (state && state.targetR >= 0 && state.targetC >= 0) {
-                  handlePiecePlacement(state.piece, state.targetR, state.targetC, state.index);
+                  const fb = [...state.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                  handlePiecePlacement(state.piece, state.targetR - fb.x, state.targetC - fb.y, state.index);
                 }
                 touchDragRef.current = null;
                 setDraggedPiece(null);
