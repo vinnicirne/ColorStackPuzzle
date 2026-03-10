@@ -133,6 +133,7 @@ export default function App() {
   const [hoverCell, setHoverCell] = useState<{ r: number; c: number } | null>(null);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
 
   const getAudio = useCallback(() => {
     if (!soundEnabled) return null;
@@ -162,13 +163,23 @@ export default function App() {
     const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
+    // Atribui cores evitando que blocos adjacentes na mesma peça tenham a mesma cor
+    // Isso previne auto-combinações (self-match) ao soltar a peça no tabuleiro
+    const assigned: { x: number; y: number; color: Color }[] = [];
+    for (const [x, y] of shapeTemplate) {
+      const neighborColors = new Set(
+        assigned
+          .filter(b => Math.abs(b.x - x) + Math.abs(b.y - y) === 1)
+          .map(b => b.color)
+      );
+      const available = colors.filter(c => !neighborColors.has(c));
+      const pool = available.length > 0 ? available : colors;
+      const color = pool[Math.floor(Math.random() * pool.length)];
+      assigned.push({ x, y, color });
+    }
     return {
       id: Math.random().toString(36).substr(2, 9),
-      shape: shapeTemplate.map(([x, y]) => ({
-        x,
-        y,
-        color: colors[Math.floor(Math.random() * colors.length)],
-      })),
+      shape: assigned,
     };
   }, []);
 
@@ -675,9 +686,11 @@ export default function App() {
               row.map((cell, c) => (
                 <motion.div
                   key={`${r}-${c}`}
+                  data-cell="true"
+                  data-r={r}
+                  data-c={c}
                   whileTap={{ scale: 0.92 }}
                   className={(() => {
-                    // Ghost preview durante drag
                     const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
                     const activeRow = hoverCell?.r ?? (selectedPiece ? r : null);
                     const activeCol = hoverCell?.c ?? (selectedPiece ? c : null);
@@ -779,6 +792,7 @@ export default function App() {
             <motion.div
               key={piece.id}
               draggable
+              style={{ touchAction: 'none' }}
               whileHover={canPlace ? { scale: 1.08, y: -4 } : {}}
               whileTap={canPlace ? { scale: 0.95 } : {}}
               onDragStart={(e) => {
@@ -787,6 +801,37 @@ export default function App() {
                 setSelectedPiece(null);
               }}
               onDragEnd={() => { setDraggedPiece(null); setHoverCell(null); }}
+              onTouchStart={(e) => {
+                if (!canPlace) return;
+                setDraggedPiece({ piece, index: idx });
+                setSelectedPiece(null);
+                touchDragRef.current = { piece, index: idx, targetR: -1, targetC: -1 };
+              }}
+              onTouchMove={(e) => {
+                if (!touchDragRef.current) return;
+                e.preventDefault();
+                const touch = e.touches[0];
+                const el = document.elementFromPoint(touch.clientX, touch.clientY);
+                const cell = el?.closest('[data-cell]');
+                if (cell) {
+                  const r = parseInt(cell.getAttribute('data-r') || '-1');
+                  const c = parseInt(cell.getAttribute('data-c') || '-1');
+                  touchDragRef.current.targetR = r;
+                  touchDragRef.current.targetC = c;
+                  setHoverCell(r >= 0 && c >= 0 ? { r, c } : null);
+                } else {
+                  setHoverCell(null);
+                }
+              }}
+              onTouchEnd={() => {
+                const state = touchDragRef.current;
+                if (state && state.targetR >= 0 && state.targetC >= 0) {
+                  handlePiecePlacement(state.piece, state.targetR, state.targetC, state.index);
+                }
+                touchDragRef.current = null;
+                setDraggedPiece(null);
+                setHoverCell(null);
+              }}
               onClick={() => handlePieceClick(piece, idx)}
               animate={{
                 scale: selectedPiece?.index === idx ? 1.1 : 1,
