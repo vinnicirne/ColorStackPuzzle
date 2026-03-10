@@ -135,11 +135,12 @@ export default function App() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
 
-  const getAudio = useCallback(() => {
+  const getAudio = useCallback(async () => {
     if (!soundEnabled) return null;
     if (!audioCtxRef.current) audioCtxRef.current = createAudioCtx();
-    if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume();
-    return audioCtxRef.current;
+    const ctx = audioCtxRef.current;
+    if (ctx?.state === 'suspended') await ctx.resume();
+    return ctx;
   }, [soundEnabled]);
 
   // ── Nível: threshold cresce com o nível ──
@@ -327,10 +328,10 @@ export default function App() {
     orange: '#f97316',
   };
 
-  const handlePiecePlacement = (piece: Piece, row: number, col: number, pieceIndex: number) => {
+  const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
     if (!canPlacePiece(piece, row, col, board)) return;
 
-    const ctx = getAudio();
+    const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
 
     let newBoard = board.map(r => [...r]);
@@ -445,7 +446,7 @@ export default function App() {
       setDraggedPiece(null);
 
       if (checkGameOver(finalPieces, newBoard)) {
-        const ctx2 = getAudio();
+        const ctx2 = await getAudio();
         if (ctx2) soundGameOver(ctx2);
         setGameState('gameover');
         updateStats(score, level);
