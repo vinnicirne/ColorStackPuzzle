@@ -133,6 +133,8 @@ export default function App() {
   const [hoverCell, setHoverCell] = useState<{ r: number; c: number } | null>(null);
   const [touchFloatPos, setTouchFloatPos] = useState<{ x: number; y: number } | null>(null);
   const [isShaking, setIsShaking] = useState(false);
+  const [boardWidth, setBoardWidth] = useState(400);
+
 
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -209,6 +211,19 @@ export default function App() {
     setClearingCells(new Set());
     setParticles([]);
   }, [generatePiece]);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      const el = document.getElementById('game-board');
+      if (el) setBoardWidth(el.offsetWidth);
+    };
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
+
+  const cellSize = (boardWidth - (BOARD_SIZE - 1) * 6) / BOARD_SIZE;
+
 
   useEffect(() => {
     const savedHighScore = localStorage.getItem('colorStackHighScore');
@@ -532,24 +547,28 @@ export default function App() {
 
       {/* Peça flutuante durante touch drag — pos atualizada direto no DOM (sem re-render) */}
       {draggedPiece && touchFloatPos && (() => {
-        const CELL = 32;
         const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
         return (
           <div
             ref={touchFloatRef}
             style={{
               position: 'fixed',
-              left: touchFloatPos.x - (fb.y * CELL + CELL / 2),
-              top: touchFloatPos.y - (fb.x * CELL + CELL / 2),
+              left: touchFloatPos.x - (fb.y * cellSize + cellSize / 2),
+              top: touchFloatPos.y - (fb.x * cellSize + cellSize / 2),
               pointerEvents: 'none',
               zIndex: 999,
-              opacity: 0.85,
-              transform: 'scale(1.15)',
+              opacity: 0.9,
+              transform: 'scale(1.05)',
             }}
           >
             <div
-              className="grid gap-1"
-              style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}
+              className="grid gap-1.5"
+              style={{ 
+                gridTemplateColumns: 'repeat(3, 1fr)', 
+                gridTemplateRows: 'repeat(3, 1fr)',
+                width: cellSize * 3 + 12,
+                height: cellSize * 3 + 12
+              }}
             >
               {Array.from({ length: 9 }).map((_, i) => {
                 const gr = Math.floor(i / 3);
@@ -558,10 +577,18 @@ export default function App() {
                 return (
                   <div
                     key={i}
-                    className={`w-7 h-7 rounded-md ${
-                      block ? `${COLOR_MAP[block.color]} block-shadow` : ''
-                    }`}
-                  />
+                    style={{ width: cellSize, height: cellSize }}
+                    className={`rounded-lg ${
+                      block ? `${COLOR_MAP[block.color]}` : ''
+                    } relative overflow-hidden`}
+                  >
+                    {block && (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
+                        <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
+                      </>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -751,6 +778,7 @@ export default function App() {
         onMouseLeave={() => { if (!draggedPiece) setHoverCell(null); }}
       >
         <motion.div
+          id="game-board"
           animate={{
             scale: isClearing ? [1, 1.01, 1] : 1,
             x: isShaking ? [0, -3, 3, -3, 3, 0] : 0,
@@ -781,23 +809,22 @@ export default function App() {
                   whileTap={{ scale: 0.92 }}
                   className={(() => {
                     const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    // Ancora no primeiro bloco visível (leitura: cima->baixo, esq->dir)
-                    // Garante que o cursor fica SOBRE um bloco real, não sobre espaço vazio
                     const firstBlock = activePiece
                       ? [...activePiece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0]
                       : { x: 0, y: 0 };
                     const anchorR = hoverCell ? hoverCell.r - firstBlock.x : -1;
                     const anchorC = hoverCell ? hoverCell.c - firstBlock.y : -1;
-                    const isGhost = activePiece && hoverCell &&
-                      activePiece.shape.some(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                    const ghostBlock = activePiece?.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                    const isGhost = !!ghostBlock;
                     const ghostFits = isGhost && canPlacePiece(activePiece!, anchorR, anchorC, board);
                     const ghostBlocked = isGhost && !ghostFits;
+
                     return [
-                      'relative rounded-lg aspect-square cursor-pointer',
-                      cell ? '' : 'bg-zinc-800/50 hover:bg-zinc-700/50',
-                      clearingCells.has(`${r}-${c}`) ? 'scale-110 brightness-200' : '',
-                      ghostFits ? 'bg-emerald-500/30 ring-2 ring-emerald-400/60 ring-inset' : '',
-                      ghostBlocked ? 'bg-rose-500/30 ring-2 ring-rose-400/60 ring-inset' : '',
+                      'relative rounded-lg aspect-square cursor-pointer transition-all duration-75',
+                      cell ? '' : 'bg-white/5 hover:bg-white/10',
+                      clearingCells.has(`${r}-${c}`) ? 'scale-110 brightness-150 z-10' : '',
+                      ghostFits ? 'ring-2 ring-white/30 z-20' : '',
+                      ghostBlocked ? 'bg-rose-500/20' : '',
                     ].join(' ');
                   })()}
                   onClick={() => handleCellClick(r, c)}
@@ -811,6 +838,23 @@ export default function App() {
                     }
                   }}
                 >
+                  {/* Gabarito / Ghost */}
+                  {(() => {
+                    const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
+                    const firstBlock = activePiece
+                      ? [...activePiece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0]
+                      : { x: 0, y: 0 };
+                    const anchorR = hoverCell ? hoverCell.r - firstBlock.x : -1;
+                    const anchorC = hoverCell ? hoverCell.c - firstBlock.y : -1;
+                    const ghostBlock = activePiece?.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                    if (!ghostBlock) return null;
+                    
+                    const fits = canPlacePiece(activePiece!, anchorR, anchorC, board);
+                    return (
+                      <div className={`absolute inset-0 rounded-lg ${COLOR_MAP[ghostBlock.color]} ${fits ? 'opacity-40 animate-pulse' : 'opacity-20 grayscale'}`} />
+                    );
+                  })()}
+
                   <AnimatePresence>
                     {cell && (
                       <motion.div
@@ -925,10 +969,9 @@ export default function App() {
                 const touch = e.touches[0];
                 // Atualiza a posição do float DIRETO no DOM — sem setState — zero lag
                 if (touchFloatRef.current) {
-                  const CELL = 32;
                   const fb = [...touchDragRef.current!.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
-                  touchFloatRef.current.style.left = `${touch.clientX - (fb.y * CELL + CELL / 2)}px`;
-                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * CELL + CELL / 2)}px`;
+                  touchFloatRef.current.style.left = `${touch.clientX - (fb.y * cellSize + cellSize / 2)}px`;
+                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2)}px`;
                 }
                 const el = document.elementFromPoint(touch.clientX, touch.clientY);
                 const cell = el?.closest('[data-cell]');
@@ -972,14 +1015,30 @@ export default function App() {
                 {Array.from({ length: 9 }).map((_, i) => {
                   const r = Math.floor(i / 3);
                   const c = i % 3;
-                  const block = piece.shape.find(b => b.x === r && b.y === c);
+                  
+                  // Centraliza peças pequenas no grid 3x3 do preview
+                  const minX = Math.min(...piece.shape.map(b => b.x));
+                  const maxX = Math.max(...piece.shape.map(b => b.x));
+                  const minY = Math.min(...piece.shape.map(b => b.y));
+                  const maxY = Math.max(...piece.shape.map(b => b.y));
+                  const shiftX = Math.floor((3 - (maxX - minX + 1)) / 2) - minX;
+                  const shiftY = Math.floor((3 - (maxY - minY + 1)) / 2) - minY;
+
+                  const block = piece.shape.find(b => b.x + shiftX === r && b.y + shiftY === c);
                   return (
                     <div
                       key={i}
                       className={`w-6 h-6 sm:w-7 sm:h-7 rounded-md ${
-                        block ? `${COLOR_MAP[block.color]} block-shadow` : 'bg-transparent'
-                      }`}
-                    />
+                        block ? `${COLOR_MAP[block.color]}` : 'bg-white/5 shadow-inner'
+                      } relative overflow-hidden`}
+                    >
+                      {block && (
+                        <>
+                          <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
+                          <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
+                        </>
+                      )}
+                    </div>
                   );
                 })}
               </div>
