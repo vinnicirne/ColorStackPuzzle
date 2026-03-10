@@ -135,6 +135,7 @@ export default function App() {
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
+  const touchFloatRef = useRef<HTMLDivElement | null>(null);
 
   const getAudio = useCallback(async () => {
     if (!soundEnabled) return null;
@@ -507,13 +508,13 @@ export default function App() {
         />
       ))}
 
-      {/* Peça flutuante durante touch drag */}
+      {/* Peça flutuante durante touch drag — pos atualizada direto no DOM (sem re-render) */}
       {draggedPiece && touchFloatPos && (() => {
-        const CELL = 32; // w-7 (28px) + gap (4px)
+        const CELL = 32;
         const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
-        // O firstBlock fica exatamente sob o dedo
         return (
           <div
+            ref={touchFloatRef}
             style={{
               position: 'fixed',
               left: touchFloatPos.x - (fb.y * CELL + CELL / 2),
@@ -750,7 +751,7 @@ export default function App() {
                     const ghostFits = isGhost && canPlacePiece(activePiece!, anchorR, anchorC, board);
                     const ghostBlocked = isGhost && !ghostFits;
                     return [
-                      'relative rounded-lg aspect-square transition-all duration-100 cursor-pointer',
+                      'relative rounded-lg aspect-square transition-colors duration-[40ms] cursor-pointer',
                       cell ? '' : 'bg-zinc-800/50 hover:bg-zinc-700/50',
                       clearingCells.has(`${r}-${c}`) ? 'scale-110 brightness-200' : '',
                       ghostFits ? 'bg-emerald-500/30 ring-2 ring-emerald-400/60 ring-inset' : '',
@@ -875,7 +876,13 @@ export default function App() {
                 if (!touchDragRef.current) return;
                 e.preventDefault();
                 const touch = e.touches[0];
-                setTouchFloatPos({ x: touch.clientX, y: touch.clientY });
+                // Atualiza a posição do float DIRETO no DOM — sem setState — zero lag
+                if (touchFloatRef.current) {
+                  const CELL = 32;
+                  const fb = [...touchDragRef.current!.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                  touchFloatRef.current.style.left = `${touch.clientX - (fb.y * CELL + CELL / 2)}px`;
+                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * CELL + CELL / 2)}px`;
+                }
                 const el = document.elementFromPoint(touch.clientX, touch.clientY);
                 const cell = el?.closest('[data-cell]');
                 if (cell) {
