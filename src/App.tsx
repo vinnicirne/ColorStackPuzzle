@@ -38,12 +38,12 @@ const SHAPES_BY_LEVEL = [
 ];
 
 const COLOR_MAP: Record<Color, string> = {
-  red: 'bg-rose-500',
-  blue: 'bg-sky-500',
-  green: 'bg-emerald-500',
-  yellow: 'bg-amber-400',
-  purple: 'bg-violet-500',
-  orange: 'bg-orange-500',
+  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_15px_rgba(244,63,94,0.4)]',
+  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-[0_0_15px_rgba(14,165,233,0.4)]',
+  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]',
+  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.4)]',
+  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[0_0_15px_rgba(139,92,246,0.4)]',
+  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[0_0_15px_rgba(249,115,22,0.4)]',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -132,6 +132,8 @@ export default function App() {
   const [pendingAfterLevel, setPendingAfterLevel] = useState<(() => void) | null>(null);
   const [hoverCell, setHoverCell] = useState<{ r: number; c: number } | null>(null);
   const [touchFloatPos, setTouchFloatPos] = useState<{ x: number; y: number } | null>(null);
+  const [isShaking, setIsShaking] = useState(false);
+
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
@@ -332,40 +334,40 @@ export default function App() {
   }, []);
 
   const PARTICLE_COLOR_MAP: Record<Color, string> = {
-    red: '#f43f5e',
-    blue: '#0ea5e9',
-    green: '#10b981',
+    red: '#fb7185',
+    blue: '#38bdf8',
+    green: '#4ade80',
     yellow: '#fbbf24',
-    purple: '#8b5cf6',
-    orange: '#f97316',
+    purple: '#c084fc',
+    orange: '#fb923c',
   };
 
   const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
-    // Trava de segurança: impede novos lances se o board ainda estiver explodindo combos
+    // Bloqueia se já estiver processando ou se a posição for inválida
     if (isClearing || !canPlacePiece(piece, row, col, board)) return;
 
     const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
 
-    let boardWithNewPiece = board.map(r => [...r]);
+    // 1. Coloca a peça no board
+    let activeBoard = board.map(r => [...r]);
     piece.shape.forEach(({ x, y, color }) => {
-      boardWithNewPiece[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
+      activeBoard[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
     });
 
     const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
 
-    // Função interna para processar cascatas de forma segura e com contador de combos
+    // Função interna para rodar os ciclos de explosão/gravidade (Combo System)
     const runMatchCycle = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
       const matchGroups = findMatches(currentBoard);
 
       if (matchGroups.length > 0) {
-        setIsClearing(true); // Bloqueia input durante o processo
+        setIsClearing(true);
         const toFlash = new Set<string>();
         const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
         let iterationScore = 0;
 
         matchGroups.forEach(group => {
-          // Bônus progressivo por combo: cada cascata subsequente vale mais
           const groupScore = calculateMatchScore(group.length) * combo;
           iterationScore += groupScore;
           
@@ -382,28 +384,34 @@ export default function App() {
           if (firstColor) spawnParticles(group, PARTICLE_COLOR_MAP[firstColor]);
         });
 
+        // Efeito visual e sonoro de match
         setClearingCells(toFlash);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 300);
         if (ctx) soundClear(ctx);
 
-        const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
         if (combo > 1) setComboText(`COMBO X${combo}! 🔥`);
-        else if (totalMatched > 5) setComboText('AMAZING! 🔥');
-        else if (totalMatched > 3) setComboText('GREAT! ⭐');
-        else setComboText('CLEAR!');
+        else {
+          const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
+          if (totalMatched > 5) setComboText('AMAZING! 🔥');
+          else if (totalMatched > 3) setComboText('GREAT! ⭐');
+          else setComboText('CLEAR!');
+        }
         
         setTimeout(() => setComboText(null), 1000);
 
-        // Aguarda a animação de explosão antes de aplicar gravidade
+        // Fase 2: Remover peças e aplicar gravidade
         setTimeout(() => {
-          const boardAfterClear = currentBoard.map(r => [...r]);
+          const tempBoard = currentBoard.map(r => [...r]);
           matchGroups.forEach(group => {
-            group.forEach(({ r, c }) => { boardAfterClear[r][c] = null; });
+            group.forEach(({ r, c }) => { tempBoard[r][c] = null; });
           });
           
-          const { newBoard: boardAfterGravity } = applyGravity(boardAfterClear);
+          const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
           const nextScore = currentScore + iterationScore;
-          
+
+          // Atualiza scores e High Score
           if (nextScore > highScore) {
             setHighScore(nextScore);
             localStorage.setItem('colorStackHighScore', nextScore.toString());
@@ -421,30 +429,33 @@ export default function App() {
             setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
           }, 800);
 
-          // Pequeno delay após a gravidade antes de checar novo match para ser visualmente claro
+          // Chamada RECURSIVA para checar se a queda gerou novos matches
+          // Usamos um delay curto (100ms) para as peças "assentarem" visualmente
           setTimeout(() => {
             runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1);
-          }, 200); 
-        }, 400);
+          }, 150); 
+        }, 350); // Flash de explosão ligeiramente mais rápido (era 400)
 
       } else {
-        // Base da recursão: sem mais matches
-        setIsClearing(false); // Libera o input para o jogador
+        // Fim da cadeia de combos
+        setIsClearing(false);
         const finalPieces = remainingPieces.length === 0
           ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
           : remainingPieces;
 
+        // Atualiza o estado final
         setBoard(currentBoard);
         setScore(currentScore);
+        setCurrentPieces(finalPieces);
+        setSelectedPiece(null);
+        setDraggedPiece(null);
 
+        // Se subiu de nível, processa agora
         if (currentLevel > level) {
           if (ctx) soundLevelUp(ctx);
           setLevel(currentLevel);
           setGameState('levelup');
           setPendingAfterLevel(() => () => {
-            setCurrentPieces(finalPieces);
-            setSelectedPiece(null);
-            setDraggedPiece(null);
             setGameState('playing');
             if (checkGameOver(finalPieces, currentBoard)) {
               setGameState('gameover');
@@ -452,9 +463,7 @@ export default function App() {
             }
           });
         } else {
-          setCurrentPieces(finalPieces);
-          setSelectedPiece(null);
-          setDraggedPiece(null);
+          // Se não subiu de nível, apenas verifica Game Over
           if (checkGameOver(finalPieces, currentBoard)) {
             if (ctx) soundGameOver(ctx);
             setGameState('gameover');
@@ -464,8 +473,8 @@ export default function App() {
       }
     };
 
-    // Inicia o processamento no combo 1
-    runMatchCycle(boardWithNewPiece, score, level, 1);
+    // Inicia o ciclo
+    runMatchCycle(activeBoard, score, level, 1);
   };
 
   const showAdAndRestart = async () => {
@@ -508,7 +517,7 @@ export default function App() {
   const levelProgress = Math.min((score - (level - 1) * 300) / 300, 1);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 overflow-hidden font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden font-sans">
 
       {/* Partículas de Explosão */}
       {particles.map(p => (
@@ -683,43 +692,55 @@ export default function App() {
       </AnimatePresence>
 
       {/* ─── HEADER ─── */}
-      <div className="w-full max-w-md flex justify-between items-center mb-4">
+      <div className="w-full max-w-md flex justify-between items-end mb-6">
         <div className="flex flex-col">
-          <h1 className="text-3xl font-display font-bold text-white tracking-tight">
-            Color <span className="text-sky-500">Stack</span>
+          <h1 className="text-4xl font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-400 to-sky-600 tracking-tighter leading-none mb-1">
+            Color Stack
           </h1>
-          <div className="flex items-center gap-2 text-zinc-400 text-sm">
-            <Trophy className="w-4 h-4 text-amber-400" />
-            <span>Recorde: {highScore}</span>
+          <div className="flex items-center gap-2 text-zinc-400 text-xs font-semibold px-1">
+            <Trophy className="w-3.5 h-3.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+            <span className="opacity-80">BEST: {highScore}</span>
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          {/* Badge de nível */}
-          <div className={`flex items-center gap-1 px-3 py-1 rounded-full bg-white/5 border border-white/10`}>
-            <Star className={`w-3 h-3 fill-current ${levelColor}`} />
-            <span className={`text-xs font-bold ${levelColor}`}>FASE {level}</span>
-          </div>
-          {/* Score */}
-          <div className="glass px-5 py-2 rounded-2xl flex flex-col items-center">
-            <span className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Score</span>
-            <span className="text-2xl font-display font-bold text-white">{score}</span>
+        <div className="flex flex-col items-end gap-3">
+          <div className="relative group">
+            {/* Glow effect behind score */}
+            <div className="absolute -inset-1 bg-gradient-to-r from-sky-600 to-violet-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
+            <div className="relative glass px-6 py-2 rounded-2xl flex flex-col items-center border border-white/10 shadow-2xl">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/80 font-black mb-0.5">SCORE</span>
+              <motion.span 
+                key={score}
+                initial={{ scale: 1.2, color: '#38bdf8' }}
+                animate={{ scale: 1, color: '#ffffff' }}
+                className="text-3xl font-display font-black text-white leading-none"
+              >
+                {score}
+              </motion.span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Barra de progresso do nível */}
-      <div className="w-full max-w-md mb-4">
-        <div className="flex justify-between text-xs text-zinc-600 mb-1">
-          <span>Progresso da fase</span>
-          <span>{Math.round(levelProgress * 100)}% → Fase {level + 1}</span>
+      <div className="w-full max-w-md mb-8">
+        <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2 px-1">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${levelColor} shadow-[0_0_8px_currentColor]`}></div>
+            <span className={levelColor}>STAGE {level}</span>
+          </div>
+          <span className="text-sky-400/80">{Math.round(levelProgress * 100)}% TO NEXT</span>
         </div>
-        <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-          <motion.div
-            className={`h-full rounded-full bg-gradient-to-r from-sky-500 to-violet-500`}
-            animate={{ width: `${levelProgress * 100}%` }}
-            transition={{ duration: 0.4 }}
-          />
+        <div className="w-full bg-black/40 h-3 rounded-full overflow-hidden p-0.5 border border-white/5 shadow-inner">
+          <div className="w-full h-full rounded-full overflow-hidden relative">
+            <motion.div
+              className={`h-full rounded-full bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-500 shadow-[0_0_15px_rgba(56,189,248,0.5)]`}
+              animate={{ width: `${levelProgress * 100}%` }}
+              transition={{ type: 'spring', stiffness: 50, damping: 15 }}
+            >
+              <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.3)_50%,transparent_75%)] bg-[length:200%_100%] animate-shimmer" />
+            </motion.div>
+          </div>
         </div>
       </div>
 
@@ -730,9 +751,17 @@ export default function App() {
         onMouseLeave={() => { if (!draggedPiece) setHoverCell(null); }}
       >
         <motion.div
-          animate={isClearing ? { scale: [1, 1.02, 1] } : {}}
-          transition={{ duration: 0.3 }}
-          className="bg-zinc-900 p-2 rounded-3xl shadow-2xl border border-white/5"
+          animate={{
+            scale: isClearing ? [1, 1.01, 1] : 1,
+            x: isShaking ? [0, -3, 3, -3, 3, 0] : 0,
+            y: isShaking ? [0, 2, -2, 2, -2, 0] : 0,
+          }}
+          transition={{ 
+            scale: { duration: 0.3 },
+            x: { duration: 0.2 },
+            y: { duration: 0.2 }
+          }}
+          className="bg-black/30 backdrop-blur-xl p-2.5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10"
         >
           <div
             className="grid gap-1.5"
@@ -789,8 +818,13 @@ export default function App() {
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0, rotate: 45 }}
-                        className={`absolute inset-0 rounded-lg ${COLOR_MAP[cell.color]} block-shadow`}
-                      />
+                        className={`absolute inset-0 rounded-lg ${COLOR_MAP[cell.color]} relative overflow-hidden`}
+                      >
+                        {/* Brilho Glossy estilo Candy Crush */}
+                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
+                        <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
+                        <div className="absolute bottom-[5%] right-[5%] w-[20%] h-[20%] bg-black/10 rounded-full pointer-events-none" />
+                      </motion.div>
                     )}
                   </AnimatePresence>
 
