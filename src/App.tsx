@@ -136,6 +136,16 @@ export default function App() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
   const touchFloatRef = useRef<HTMLDivElement | null>(null);
+  // Ref para evitar setHoverCell redundante quando o dedo/cursor não mudou de célula
+  const hoverCellRef = useRef<{ r: number; c: number } | null>(null);
+  const setHoverCellFast = (next: { r: number; c: number } | null) => {
+    if (next === null) {
+      if (hoverCellRef.current !== null) { hoverCellRef.current = null; setHoverCell(null); }
+    } else if (hoverCellRef.current?.r !== next.r || hoverCellRef.current?.c !== next.c) {
+      hoverCellRef.current = next;
+      setHoverCell(next);
+    }
+  };
 
   const getAudio = useCallback(async () => {
     if (!soundEnabled) return null;
@@ -751,7 +761,7 @@ export default function App() {
                     const ghostFits = isGhost && canPlacePiece(activePiece!, anchorR, anchorC, board);
                     const ghostBlocked = isGhost && !ghostFits;
                     return [
-                      'relative rounded-lg aspect-square transition-colors duration-[40ms] cursor-pointer',
+                      'relative rounded-lg aspect-square cursor-pointer',
                       cell ? '' : 'bg-zinc-800/50 hover:bg-zinc-700/50',
                       clearingCells.has(`${r}-${c}`) ? 'scale-110 brightness-200' : '',
                       ghostFits ? 'bg-emerald-500/30 ring-2 ring-emerald-400/60 ring-inset' : '',
@@ -759,8 +769,8 @@ export default function App() {
                     ].join(' ');
                   })()}
                   onClick={() => handleCellClick(r, c)}
-                  onMouseEnter={() => setHoverCell({ r, c })}
-                  onDragOver={(e) => { e.preventDefault(); setHoverCell({ r, c }); }}
+                  onMouseEnter={() => setHoverCellFast({ r, c })}
+                  onDragOver={(e) => { e.preventDefault(); setHoverCellFast({ r, c }); }}
                   onDrop={() => {
                     setHoverCell(null);
                     if (draggedPiece) {
@@ -890,9 +900,9 @@ export default function App() {
                   const c = parseInt(cell.getAttribute('data-c') || '-1');
                   touchDragRef.current.targetR = r;
                   touchDragRef.current.targetC = c;
-                  setHoverCell(r >= 0 && c >= 0 ? { r, c } : null);
+                  setHoverCellFast(r >= 0 && c >= 0 ? { r, c } : null);
                 } else {
-                  setHoverCell(null);
+                  setHoverCellFast(null);
                 }
               }}
               onTouchEnd={() => {
