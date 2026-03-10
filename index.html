@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#09090b" />
+  <title>Color Stack Puzzle</title>
+  <meta name="description" content="Jogo de puzzle casual. Combine blocos coloridos, avance nas fases e bata seu recorde!" />
+
+  <!-- AdMob App ID: ca-app-pub-2871403878275209~3894483987 -->
+  <!-- Ad Unit ID:  ca-app-pub-2871403878275209/9050607747  -->
+  <!-- Nota: AdMob SDK fica ativo quando o app é empacotado via Capacitor para Android/iOS -->
+  <!-- Para web preview, os anúncios são simulados na tela de 'ad' state -->
+
+  <script>
+    // Workaround para ambientes que restringem window.fetch
+    (function () {
+      try {
+        const originalFetch = window.fetch;
+        if (originalFetch) {
+          Object.defineProperty(window, 'fetch', {
+            get: function () { return originalFetch; },
+            set: function () { console.warn('Attempted to overwrite window.fetch - ignored.'); },
+            configurable: true,
+            enumerable: true
+          });
+        }
+      } catch (e) {
+        console.error('Failed to apply fetch workaround:', e);
+      }
+    })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@700;800;900&display=swap" rel="stylesheet" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

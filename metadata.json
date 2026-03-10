@@ -1,0 +1,5 @@
+{
+  "name": "Color Stack Puzzle",
+  "description": "A vibrant casual puzzle game where you stack colored blocks and clear groups of 3 or more to score points.",
+  "requestFramePermissions": []
+}
