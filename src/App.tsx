@@ -346,124 +346,116 @@ export default function App() {
     const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
 
-    let newBoard = board.map(r => [...r]);
+    let boardWithNewPiece = board.map(r => [...r]);
     piece.shape.forEach(({ x, y, color }) => {
-      newBoard[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
+      boardWithNewPiece[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
     });
 
-    const matchGroups = findMatches(newBoard);
+    const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
 
-    if (matchGroups.length > 0) {
-      const toFlash = new Set<string>();
-      const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
-      let iterationScore = 0;
+    // Função recursiva para processar cascatas (combos)
+    const processMatchesRecursive = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number) => {
+      const matchGroups = findMatches(currentBoard);
 
-      matchGroups.forEach(group => {
-        const groupScore = calculateMatchScore(group.length);
-        iterationScore += groupScore;
-        const center = group[Math.floor(group.length / 2)];
-        newFloatingPoints.push({
-          id: Math.random().toString(36).substr(2, 9),
-          r: center.r,
-          c: center.c,
-          points: groupScore,
-        });
-        group.forEach(({ r, c }) => toFlash.add(`${r}-${c}`));
+      if (matchGroups.length > 0) {
+        const toFlash = new Set<string>();
+        const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
+        let iterationScore = 0;
 
-        // Partículas — cor do primeiro bloco do grupo
-        const firstColor = newBoard[group[0].r][group[0].c]?.color;
-        if (firstColor) spawnParticles(group, PARTICLE_COLOR_MAP[firstColor]);
-      });
-
-      setClearingCells(toFlash);
-      setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
-      setIsClearing(true);
-
-      if (ctx) soundClear(ctx);
-
-      const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-      if (totalMatched > 5) setComboText('AMAZING! 🔥');
-      else if (totalMatched > 3) setComboText('GREAT! ⭐');
-      else setComboText('CLEAR!');
-      setTimeout(() => setComboText(null), 1000);
-
-      setTimeout(() => {
-        const boardAfterClear = newBoard.map(r => [...r]);
         matchGroups.forEach(group => {
-          group.forEach(({ r, c }) => { boardAfterClear[r][c] = null; });
+          const groupScore = calculateMatchScore(group.length);
+          iterationScore += groupScore;
+          const center = group[Math.floor(group.length / 2)];
+          newFloatingPoints.push({
+            id: Math.random().toString(36).substr(2, 9),
+            r: center.r,
+            c: center.c,
+            points: groupScore,
+          });
+          group.forEach(({ r, c }) => toFlash.add(`${r}-${c}`));
+
+          const firstColor = currentBoard[group[0].r][group[0].c]?.color;
+          if (firstColor) spawnParticles(group, PARTICLE_COLOR_MAP[firstColor]);
         });
-        const { newBoard: boardAfterGravity } = applyGravity(boardAfterClear);
 
-        const finalScore = score + iterationScore;
+        setClearingCells(toFlash);
+        setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
+        setIsClearing(true);
+        if (ctx) soundClear(ctx);
 
-        if (finalScore > highScore) {
-          setHighScore(finalScore);
-          localStorage.setItem('colorStackHighScore', finalScore.toString());
-        }
-
-        // ── Verificar Level Up ──
-        const newLevel = Math.floor(finalScore / levelThreshold(level)) >= 1
-          ? level + 1
-          : level;
-
-        const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
-        const finalPieces = remainingPieces.length === 0
-          ? [generatePiece(newLevel), generatePiece(newLevel), generatePiece(newLevel)]
-          : remainingPieces;
-
-        setClearingCells(new Set());
-        setBoard(boardAfterGravity);
-        setScore(finalScore);
-        setIsClearing(false);
+        const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
+        if (totalMatched > 5) setComboText('AMAZING! 🔥');
+        else if (totalMatched > 3) setComboText('GREAT! ⭐');
+        else setComboText('CLEAR!');
+        setTimeout(() => setComboText(null), 1000);
 
         setTimeout(() => {
-          setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
-        }, 800);
+          const boardAfterClear = currentBoard.map(r => [...r]);
+          matchGroups.forEach(group => {
+            group.forEach(({ r, c }) => { boardAfterClear[r][c] = null; });
+          });
+          const { newBoard: boardAfterGravity } = applyGravity(boardAfterClear);
 
-        if (newLevel > level) {
-          // Level up!
+          const nextScore = currentScore + iterationScore;
+          if (nextScore > highScore) {
+            setHighScore(nextScore);
+            localStorage.setItem('colorStackHighScore', nextScore.toString());
+          }
+
+          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1
+            ? currentLevel + 1
+            : currentLevel;
+
+          setClearingCells(new Set());
+          setBoard(boardAfterGravity);
+          setScore(nextScore);
+          setIsClearing(false);
+
+          setTimeout(() => {
+            setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
+          }, 800);
+
+          // Chamada recursiva para processar nova cascata após a gravidade
+          processMatchesRecursive(boardAfterGravity, nextScore, nextLevel);
+        }, 400);
+      } else {
+        // Sem mais matches - Finaliza a rodada e gera novas peças se necessário
+        const finalPieces = remainingPieces.length === 0
+          ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
+          : remainingPieces;
+
+        setBoard(currentBoard);
+        setScore(currentScore);
+
+        if (currentLevel > level) {
           if (ctx) soundLevelUp(ctx);
-          setLevel(newLevel);
+          setLevel(currentLevel);
           setGameState('levelup');
           setPendingAfterLevel(() => () => {
             setCurrentPieces(finalPieces);
             setSelectedPiece(null);
             setDraggedPiece(null);
             setGameState('playing');
-            if (checkGameOver(finalPieces, boardAfterGravity)) {
+            if (checkGameOver(finalPieces, currentBoard)) {
               setGameState('gameover');
-              updateStats(finalScore, newLevel);
+              updateStats(currentScore, currentLevel);
             }
           });
         } else {
           setCurrentPieces(finalPieces);
           setSelectedPiece(null);
           setDraggedPiece(null);
-          if (checkGameOver(finalPieces, boardAfterGravity)) {
+          if (checkGameOver(finalPieces, currentBoard)) {
             if (ctx) soundGameOver(ctx);
             setGameState('gameover');
-            updateStats(finalScore, level);
+            updateStats(currentScore, currentLevel);
           }
         }
-      }, 400);
-    } else {
-      const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
-      const finalPieces = remainingPieces.length === 0
-        ? [generatePiece(level), generatePiece(level), generatePiece(level)]
-        : remainingPieces;
-
-      setBoard(newBoard);
-      setCurrentPieces(finalPieces);
-      setSelectedPiece(null);
-      setDraggedPiece(null);
-
-      if (checkGameOver(finalPieces, newBoard)) {
-        const ctx2 = await getAudio();
-        if (ctx2) soundGameOver(ctx2);
-        setGameState('gameover');
-        updateStats(score, level);
       }
-    }
+    };
+
+    // Inicia a cadeia de processamento
+    processMatchesRecursive(boardWithNewPiece, score, level);
   };
 
   const showAdAndRestart = async () => {
