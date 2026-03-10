@@ -341,7 +341,8 @@ export default function App() {
   };
 
   const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
-    if (!canPlacePiece(piece, row, col, board)) return;
+    // Trava de segurança: impede novos lances se o board ainda estiver explodindo combos
+    if (isClearing || !canPlacePiece(piece, row, col, board)) return;
 
     const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
@@ -353,18 +354,21 @@ export default function App() {
 
     const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
 
-    // Função recursiva para processar cascatas (combos)
-    const processMatchesRecursive = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number) => {
+    // Função interna para processar cascatas de forma segura e com contador de combos
+    const runMatchCycle = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
       const matchGroups = findMatches(currentBoard);
 
       if (matchGroups.length > 0) {
+        setIsClearing(true); // Bloqueia input durante o processo
         const toFlash = new Set<string>();
         const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
         let iterationScore = 0;
 
         matchGroups.forEach(group => {
-          const groupScore = calculateMatchScore(group.length);
+          // Bônus progressivo por combo: cada cascata subsequente vale mais
+          const groupScore = calculateMatchScore(group.length) * combo;
           iterationScore += groupScore;
+          
           const center = group[Math.floor(group.length / 2)];
           newFloatingPoints.push({
             id: Math.random().toString(36).substr(2, 9),
@@ -380,46 +384,52 @@ export default function App() {
 
         setClearingCells(toFlash);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
-        setIsClearing(true);
         if (ctx) soundClear(ctx);
 
         const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-        if (totalMatched > 5) setComboText('AMAZING! 🔥');
+        if (combo > 1) setComboText(`COMBO X${combo}! 🔥`);
+        else if (totalMatched > 5) setComboText('AMAZING! 🔥');
         else if (totalMatched > 3) setComboText('GREAT! ⭐');
         else setComboText('CLEAR!');
+        
         setTimeout(() => setComboText(null), 1000);
 
+        // Aguarda a animação de explosão antes de aplicar gravidade
         setTimeout(() => {
           const boardAfterClear = currentBoard.map(r => [...r]);
           matchGroups.forEach(group => {
             group.forEach(({ r, c }) => { boardAfterClear[r][c] = null; });
           });
+          
           const { newBoard: boardAfterGravity } = applyGravity(boardAfterClear);
-
           const nextScore = currentScore + iterationScore;
+          
           if (nextScore > highScore) {
             setHighScore(nextScore);
             localStorage.setItem('colorStackHighScore', nextScore.toString());
           }
 
-          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1
-            ? currentLevel + 1
+          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1 
+            ? currentLevel + 1 
             : currentLevel;
 
           setClearingCells(new Set());
           setBoard(boardAfterGravity);
           setScore(nextScore);
-          setIsClearing(false);
 
           setTimeout(() => {
             setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
           }, 800);
 
-          // Chamada recursiva para processar nova cascata após a gravidade
-          processMatchesRecursive(boardAfterGravity, nextScore, nextLevel);
+          // Pequeno delay após a gravidade antes de checar novo match para ser visualmente claro
+          setTimeout(() => {
+            runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1);
+          }, 200); 
         }, 400);
+
       } else {
-        // Sem mais matches - Finaliza a rodada e gera novas peças se necessário
+        // Base da recursão: sem mais matches
+        setIsClearing(false); // Libera o input para o jogador
         const finalPieces = remainingPieces.length === 0
           ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
           : remainingPieces;
@@ -454,8 +464,8 @@ export default function App() {
       }
     };
 
-    // Inicia a cadeia de processamento
-    processMatchesRecursive(boardWithNewPiece, score, level);
+    // Inicia o processamento no combo 1
+    runMatchCycle(boardWithNewPiece, score, level, 1);
   };
 
   const showAdAndRestart = async () => {
@@ -483,7 +493,8 @@ export default function App() {
   };
 
   const handleCellClick = (row: number, col: number) => {
-    if (selectedPiece) {
+    // Impede interação se o tabuleiro estiver processando combos/explosões
+    if (selectedPiece && !isClearing && gameState === 'playing') {
       const fb = [...selectedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
       handlePiecePlacement(selectedPiece.piece, row - fb.x, col - fb.y, selectedPiece.index);
     }
