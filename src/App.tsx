@@ -131,6 +131,7 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [pendingAfterLevel, setPendingAfterLevel] = useState<(() => void) | null>(null);
   const [hoverCell, setHoverCell] = useState<{ r: number; c: number } | null>(null);
+  const [touchFloatPos, setTouchFloatPos] = useState<{ x: number; y: number } | null>(null);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const touchDragRef = useRef<{ piece: Piece; index: number; targetR: number; targetC: number } | null>(null);
@@ -506,6 +507,45 @@ export default function App() {
         />
       ))}
 
+      {/* Peça flutuante durante touch drag */}
+      {draggedPiece && touchFloatPos && (() => {
+        const CELL = 32; // w-7 (28px) + gap (4px)
+        const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+        // O firstBlock fica exatamente sob o dedo
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              left: touchFloatPos.x - (fb.y * CELL + CELL / 2),
+              top: touchFloatPos.y - (fb.x * CELL + CELL / 2),
+              pointerEvents: 'none',
+              zIndex: 999,
+              opacity: 0.85,
+              transform: 'scale(1.15)',
+            }}
+          >
+            <div
+              className="grid gap-1"
+              style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}
+            >
+              {Array.from({ length: 9 }).map((_, i) => {
+                const gr = Math.floor(i / 3);
+                const gc = i % 3;
+                const block = draggedPiece.piece.shape.find(b => b.x === gr && b.y === gc);
+                return (
+                  <div
+                    key={i}
+                    className={`w-7 h-7 rounded-md ${
+                      block ? `${COLOR_MAP[block.color]} block-shadow` : ''
+                    }`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ─── MENU ─── */}
       <AnimatePresence>
         {gameState === 'menu' && (
@@ -814,6 +854,10 @@ export default function App() {
               whileHover={canPlace ? { scale: 1.08, y: -4 } : {}}
               whileTap={canPlace ? { scale: 0.95 } : {}}
               onDragStart={(e) => {
+                // Esconde a imagem padrão do browser — o ghost do board é o feedback visual
+                const ghost = new Image();
+                ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                e.dataTransfer.setDragImage(ghost, 0, 0);
                 e.dataTransfer.setData('text/plain', '');
                 setDraggedPiece({ piece, index: idx });
                 setSelectedPiece(null);
@@ -821,14 +865,17 @@ export default function App() {
               onDragEnd={() => { setDraggedPiece(null); setHoverCell(null); }}
               onTouchStart={(e) => {
                 if (!canPlace) return;
+                const touch = e.touches[0];
                 setDraggedPiece({ piece, index: idx });
                 setSelectedPiece(null);
+                setTouchFloatPos({ x: touch.clientX, y: touch.clientY });
                 touchDragRef.current = { piece, index: idx, targetR: -1, targetC: -1 };
               }}
               onTouchMove={(e) => {
                 if (!touchDragRef.current) return;
                 e.preventDefault();
                 const touch = e.touches[0];
+                setTouchFloatPos({ x: touch.clientX, y: touch.clientY });
                 const el = document.elementFromPoint(touch.clientX, touch.clientY);
                 const cell = el?.closest('[data-cell]');
                 if (cell) {
@@ -850,6 +897,7 @@ export default function App() {
                 touchDragRef.current = null;
                 setDraggedPiece(null);
                 setHoverCell(null);
+                setTouchFloatPos(null);
               }}
               onClick={() => handlePieceClick(piece, idx)}
               animate={{
