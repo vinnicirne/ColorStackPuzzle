@@ -14,26 +14,31 @@ const BASE_COLORS: Color[] = ['red', 'blue', 'green', 'yellow', 'purple'];
 
 // Shapes desbloqueadas por nível
 const SHAPES_BY_LEVEL = [
-  // Nível 1-2: formas simples
+  // Nível 1-2: formas básicas (1-3 blocos)
   [
     [[0, 0]],
     [[0, 0], [0, 1]],
     [[0, 0], [1, 0]],
-    [[0, 0], [0, 1], [1, 0], [1, 1]],
-  ],
-  // Nível 3-4: formas médias
-  [
-    [[0, 0], [0, 1], [0, 2]],
-    [[0, 0], [1, 0], [2, 0]],
+    [[0, 0], [0, 1], [1, 0]],
     [[0, 0], [0, 1], [1, 1]],
-    [[0, 0], [1, 0], [1, 1]],
   ],
-  // Nível 5+: formas avançadas
+  // Nível 3-5: formas médias (4 blocos)
   [
-    [[0, 0], [0, 1], [0, 2], [1, 2]],
-    [[0, 0], [1, 0], [1, 1], [1, 2]],
-    [[0, 1], [1, 0], [1, 1], [1, 2]],
-    [[0, 0], [0, 1], [1, 1], [1, 2]],
+    [[0, 0], [0, 1], [1, 0], [1, 1]], // Quadrado
+    [[0, 0], [0, 1], [0, 2], [0, 3]], // Linha
+    [[0, 0], [1, 0], [2, 0], [3, 0]], // Coluna
+    [[0, 0], [0, 1], [0, 2], [1, 1]], // T
+    [[0, 0], [1, 0], [2, 0], [2, 1]], // L
+    [[0, 0], [1, 0], [1, 1], [2, 1]], // Z
+  ],
+  // Nível 6+: formas desafiadoras (5+ blocos e formatos estranhos)
+  [
+    [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]], // L Grande
+    [[0, 2], [1, 2], [2, 0], [2, 1], [2, 2]], // J Grande
+    [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]], // Cruz +
+    [[0, 0], [0, 1], [1, 1], [2, 1], [2, 2]], // Escada
+    [[0, 0], [0, 1], [0, 2], [1, 0], [1, 2]], // U (Copo)
+    [[0, 0], [1, 0], [1, 1], [1, 2], [2, 2]], // S Longo
   ],
 ];
 
@@ -230,6 +235,12 @@ export default function App() {
     if (savedHighScore) setHighScore(parseInt(savedHighScore));
     const savedStats = localStorage.getItem('colorStackStats');
     if (savedStats) setStats(JSON.parse(savedStats));
+
+    // Inicializa AdMob no Startup (Nativo)
+    const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+    if (isNative) {
+      AdMob.initialize({ initializeForTesting: true }).catch(err => console.log('AdMob Init Fail:', err));
+    }
   }, []);
 
   const updateStats = useCallback((finalScore: number, finalLevel: number) => {
@@ -493,15 +504,14 @@ export default function App() {
 
     if (isNative) {
       try {
-        await AdMob.initialize({ initializeForTesting: false });
         await AdMob.prepareInterstitial({ adId: AD_UNIT_ID });
         await AdMob.showInterstitial();
-        // Escuta o evento de fechamento do anúncio para reiniciar
-        AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+        const listener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+          listener.remove();
           startNewGame();
         });
-      } catch {
-        // Se falhar (sem conectividade, etc.), reinicia direto
+      } catch (err) {
+        console.error('AdMob Show Error:', err);
         startNewGame();
       }
     } else {
@@ -559,15 +569,15 @@ export default function App() {
             <div
               className="grid gap-1.5"
               style={{ 
-                gridTemplateColumns: 'repeat(3, 1fr)', 
-                gridTemplateRows: 'repeat(3, 1fr)',
-                width: cellSize * 3 + 12,
-                height: cellSize * 3 + 12
+                gridTemplateColumns: 'repeat(5, 1fr)', 
+                gridTemplateRows: 'repeat(5, 1fr)',
+                width: cellSize * 5 + 12,
+                height: cellSize * 5 + 12
               }}
             >
-              {Array.from({ length: 9 }).map((_, i) => {
-                const gr = Math.floor(i / 3);
-                const gc = i % 3;
+              {Array.from({ length: 25 }).map((_, i) => {
+                const gr = Math.floor(i / 5);
+                const gc = i % 5;
                 const block = draggedPiece.piece.shape.find(b => b.x === gr && b.y === gc);
                 return (
                   <div
@@ -961,7 +971,8 @@ export default function App() {
                 const touch = e.touches[0];
                 setDraggedPiece({ piece, index: idx });
                 setSelectedPiece(null);
-                setTouchFloatPos({ x: touch.clientX, y: touch.clientY });
+                // Inicia já com o offset de -30 para evitar o "pulo" ao começar a mover
+                setTouchFloatPos({ x: touch.clientX, y: touch.clientY - 30 });
                 touchDragRef.current = { piece, index: idx, targetR: -1, targetC: -1 };
               }}
               onTouchMove={(e) => {
@@ -975,7 +986,8 @@ export default function App() {
                   touchFloatRef.current.style.left = `${touch.clientX - (fb.y * cellSize + cellSize / 2)}px`;
                   touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2) - 30}px`;
                 }
-                const el = document.elementFromPoint(touch.clientX, touch.clientY);
+                // Detecta a célula baseada na posição DA PEÇA (30px acima), não do dedo
+                const el = document.elementFromPoint(touch.clientX, touch.clientY - 30);
                 const cell = el?.closest('[data-cell]');
                 if (cell) {
                   const r = parseInt(cell.getAttribute('data-r') || '-1');
@@ -1012,25 +1024,25 @@ export default function App() {
             >
               <div
                 className="grid gap-1"
-                style={{ gridTemplateColumns: `repeat(3, 1fr)`, gridTemplateRows: `repeat(3, 1fr)` }}
+                style={{ gridTemplateColumns: `repeat(5, 1fr)`, gridTemplateRows: `repeat(5, 1fr)` }}
               >
-                {Array.from({ length: 9 }).map((_, i) => {
-                  const r = Math.floor(i / 3);
-                  const c = i % 3;
+                {Array.from({ length: 25 }).map((_, i) => {
+                  const r = Math.floor(i / 5);
+                  const c = i % 5;
                   
-                  // Centraliza peças pequenas no grid 3x3 do preview
+                  // Centraliza peças no grid 5x5 do preview
                   const minX = Math.min(...piece.shape.map(b => b.x));
                   const maxX = Math.max(...piece.shape.map(b => b.x));
                   const minY = Math.min(...piece.shape.map(b => b.y));
                   const maxY = Math.max(...piece.shape.map(b => b.y));
-                  const shiftX = Math.floor((3 - (maxX - minX + 1)) / 2) - minX;
-                  const shiftY = Math.floor((3 - (maxY - minY + 1)) / 2) - minY;
+                  const shiftX = Math.floor((5 - (maxX - minX + 1)) / 2) - minX;
+                  const shiftY = Math.floor((5 - (maxY - minY + 1)) / 2) - minY;
 
                   const block = piece.shape.find(b => b.x + shiftX === r && b.y + shiftY === c);
                   return (
                     <div
                       key={i}
-                      className={`w-6 h-6 sm:w-7 sm:h-7 rounded-md ${
+                      className={`w-3 h-3 sm:w-4 sm:h-4 rounded-sm ${
                         block ? `${COLOR_MAP[block.color]}` : 'bg-white/5 shadow-inner'
                       } relative overflow-hidden`}
                     >
