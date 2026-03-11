@@ -598,11 +598,11 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-950 p-6"
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-zinc-900 via-zinc-950 to-black p-6"
           >
             <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="text-center mb-12">
               <h1 className="text-6xl font-display font-black text-white mb-2 tracking-tighter">
-                COLOR <span className="text-sky-500">STACK</span>
+                COLOR <span className="bg-gradient-to-r from-sky-400 to-fuchsia-500 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(14,165,233,0.3)]">STACK</span>
               </h1>
               <p className="text-zinc-500 font-medium tracking-widest uppercase text-sm">Casual Puzzle Experience</p>
             </motion.div>
@@ -610,21 +610,22 @@ export default function App() {
             <div className="flex flex-col gap-4 w-full max-w-xs">
               <button
                 onClick={startNewGame}
-                className="bg-sky-500 hover:bg-sky-400 text-white py-5 rounded-3xl font-display font-bold text-xl transition-all active:scale-95 shadow-xl shadow-sky-500/20 flex items-center justify-center gap-3"
+                className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-400 hover:to-purple-500 text-white py-5 rounded-3xl font-display font-bold text-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(232,121,249,0.4)] flex items-center justify-center gap-3 relative overflow-hidden group"
               >
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                 <Play className="w-6 h-6 fill-current" />
                 JOGAR
               </button>
               <button
                 onClick={() => setShowStats(true)}
-                className="bg-zinc-900 hover:bg-zinc-800 text-white py-4 rounded-3xl font-bold transition-all active:scale-95 border border-white/5 flex items-center justify-center gap-3"
+                className="bg-white/5 hover:bg-white/10 backdrop-blur-md text-white py-4 rounded-3xl font-bold transition-all active:scale-95 border border-white/10 flex items-center justify-center gap-3"
               >
                 <BarChart2 className="w-5 h-5" />
                 ESTATÍSTICAS
               </button>
               <button
                 onClick={() => setShowInfo(true)}
-                className="bg-zinc-900 hover:bg-zinc-800 text-white py-4 rounded-3xl font-bold transition-all active:scale-95 border border-white/5 flex items-center justify-center gap-3"
+                className="bg-white/5 hover:bg-white/10 backdrop-blur-md text-white py-4 rounded-3xl font-bold transition-all active:scale-95 border border-white/10 flex items-center justify-center gap-3"
               >
                 <Info className="w-5 h-5" />
                 COMO JOGAR
@@ -675,7 +676,7 @@ export default function App() {
                     setPendingAfterLevel(null);
                   }
                 }}
-                className={`bg-sky-500 hover:bg-sky-400 text-white px-10 py-4 rounded-2xl font-display font-bold text-xl transition-all active:scale-95 shadow-xl`}
+                className={`bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-400 hover:to-purple-500 text-white px-10 py-4 rounded-2xl font-display font-bold text-xl transition-all active:scale-95 shadow-xl shadow-fuchsia-500/20`}
               >
                 CONTINUAR →
               </button>
@@ -716,7 +717,7 @@ export default function App() {
       {/* ─── HEADER ─── */}
       <div className="w-full max-w-md flex justify-between items-end mb-6">
         <div className="flex flex-col">
-          <h1 className="text-4xl font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-400 to-sky-600 tracking-tighter leading-none mb-1">
+          <h1 className="text-4xl font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 via-violet-400 to-sky-400 tracking-tighter leading-none mb-1">
             Color Stack
           </h1>
           <div className="flex items-center gap-2 text-zinc-400 text-xs font-semibold px-1">
@@ -911,14 +912,14 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center glass rounded-3xl"
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-xl rounded-3xl border border-white/5"
             >
               <h2 className="text-4xl font-display font-bold text-white mb-1">Game Over</h2>
               <p className="text-zinc-400 mb-1">Score: {score} pts</p>
               <p className="text-zinc-500 text-sm mb-6">Fase {level} concluída</p>
               <button
                 onClick={showAdAndRestart}
-                className="bg-sky-500 hover:bg-sky-400 text-white px-8 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-sky-500/20"
+                className="bg-gradient-to-r from-sky-400 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-sky-500/30"
               >
                 <RotateCcw className="w-5 h-5" />
                 Jogar de Novo
@@ -1061,21 +1062,21 @@ export default function App() {
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="bg-zinc-900 border border-white/10 p-8 rounded-3xl max-w-sm w-full shadow-2xl"
+              className="bg-zinc-950/90 border border-white/10 p-8 rounded-[2.5rem] max-w-sm w-full shadow-2xl backdrop-blur-2xl"
               onClick={e => e.stopPropagation()}
             >
               <h3 className="text-2xl font-display font-bold text-white mb-4">Como Jogar</h3>
               <ul className="space-y-4 text-zinc-400">
                 <li className="flex gap-3">
-                  <span className="bg-sky-500/20 text-sky-500 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold">1</span>
+                  <span className="bg-gradient-to-br from-fuchsia-500 to-purple-600 text-white w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-black shadow-lg shadow-fuchsia-500/30">1</span>
                   <p>Clique em uma peça para selecioná-la, depois clique no tabuleiro para colocar.</p>
                 </li>
                 <li className="flex gap-3">
-                  <span className="bg-sky-500/20 text-sky-500 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold">2</span>
+                  <span className="bg-gradient-to-br from-fuchsia-500 to-purple-600 text-white w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-black shadow-lg shadow-fuchsia-500/30">2</span>
                   <p>Junte <span className="text-white font-bold">3 ou mais</span> blocos da mesma cor para explodir.</p>
                 </li>
                 <li className="flex gap-3">
-                  <span className="bg-sky-500/20 text-sky-500 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold">3</span>
+                  <span className="bg-gradient-to-br from-fuchsia-500 to-purple-600 text-white w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-black shadow-lg shadow-fuchsia-500/30">3</span>
                   <p>A cada fase, novas cores e peças aparecem. Não deixe o board encher!</p>
                 </li>
               </ul>
@@ -1095,7 +1096,7 @@ export default function App() {
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="bg-zinc-900 border border-white/10 p-8 rounded-3xl max-w-sm w-full shadow-2xl"
+              className="bg-zinc-950/90 border border-white/10 p-8 rounded-[2.5rem] max-w-sm w-full shadow-2xl backdrop-blur-2xl"
               onClick={e => e.stopPropagation()}
             >
               <h3 className="text-2xl font-display font-bold text-white mb-6">Suas Estatísticas</h3>
