@@ -38,12 +38,12 @@ const SHAPES_BY_LEVEL = [
 ];
 
 const COLOR_MAP: Record<Color, string> = {
-  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-rose-500/50 shadow-md',
-  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-sky-500/50 shadow-md',
-  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-emerald-500/50 shadow-md',
-  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-amber-500/50 shadow-md',
-  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-fuchsia-500/50 shadow-md',
-  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-orange-500/50 shadow-md',
+  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(244,63,94,0.5)]',
+  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(14,165,233,0.5)]',
+  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(16,185,129,0.5)]',
+  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(251,191,36,0.5)]',
+  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(139,92,246,0.5)]',
+  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(249,115,22,0.5)]',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -364,22 +364,21 @@ export default function App() {
     const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
 
-    // 1. Coloca a peça no board
-    let activeBoard = board.map(r => [...r]);
+    // 1. Gera o novo board localmente
+    const activeBoard = board.map(r => [...r]);
     piece.shape.forEach(({ x, y, color }) => {
       activeBoard[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
     });
 
     const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
     
-    // Mostra a peça IMEDIATAMENTE no quadro para feedback instantâneo
-    setBoard(activeBoard);
-    setCurrentPieces(remainingPieces);
+    // 2. Atualiza estado imediatamente para feedback visual instantâneo
+    setBoard(() => [...activeBoard]);
+    setCurrentPieces(() => [...remainingPieces]);
     setSelectedPiece(null);
     setDraggedPiece(null);
 
-
-    // Função interna para rodar os ciclos de explosão/gravidade (Combo System)
+    // 3. Função recursiva para processar matches e cascatas
     const runMatchCycle = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
       const matchGroups = findMatches(currentBoard);
 
@@ -406,7 +405,6 @@ export default function App() {
           if (firstColor) spawnParticles(group, PARTICLE_COLOR_MAP[firstColor]);
         });
 
-        // Efeito visual e sonoro de match
         setClearingCells(toFlash);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
         setIsShaking(true);
@@ -423,7 +421,7 @@ export default function App() {
         
         setTimeout(() => setComboText(null), 1000);
 
-        // Fase 2: Remover peças e aplicar gravidade
+        // Fase de Gravidade
         setTimeout(() => {
           const tempBoard = currentBoard.map(r => [...r]);
           matchGroups.forEach(group => {
@@ -433,47 +431,36 @@ export default function App() {
           const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
           const nextScore = currentScore + iterationScore;
 
-          // Atualiza scores e High Score
           if (nextScore > highScore) {
             setHighScore(nextScore);
             localStorage.setItem('colorStackHighScore', nextScore.toString());
           }
 
-          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1 
-            ? currentLevel + 1 
-            : currentLevel;
+          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1 ? currentLevel + 1 : currentLevel;
 
           setClearingCells(new Set());
-          setBoard(boardAfterGravity);
+          setBoard(() => [...boardAfterGravity]);
           setScore(nextScore);
 
           setTimeout(() => {
             setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
           }, 800);
 
-          // Chamada RECURSIVA para checar se a queda gerou novos matches
-          // Usamos um delay curto (100ms) para as peças "assentarem" visualmente
-          setTimeout(() => {
-            runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1);
-          }, 150); 
-        }, 350); // Flash de explosão ligeiramente mais rápido (era 400)
+          // Recursão para cascatas
+          setTimeout(() => runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1), 150);
+        }, 350);
 
       } else {
-        // Fim da cadeia de combos
+        // Sem mais matches, finaliza rodada
         setIsClearing(false);
         const finalPieces = remainingPieces.length === 0
           ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
           : remainingPieces;
 
-        // Atualiza o estado final (caso não tenha matches ou após o ciclo)
-        setBoard([...currentBoard]);
+        setBoard(() => [...currentBoard]);
         setScore(currentScore);
-        setCurrentPieces(finalPieces);
-        setSelectedPiece(null);
-        setDraggedPiece(null);
+        setCurrentPieces(() => [...finalPieces]);
 
-
-        // Se subiu de nível, processa agora
         if (currentLevel > level) {
           if (ctx) soundLevelUp(ctx);
           setLevel(currentLevel);
@@ -486,7 +473,6 @@ export default function App() {
             }
           });
         } else {
-          // Se não subiu de nível, apenas verifica Game Over
           if (checkGameOver(finalPieces, currentBoard)) {
             if (ctx) soundGameOver(ctx);
             setGameState('gameover');
@@ -496,9 +482,10 @@ export default function App() {
       }
     };
 
-    // Inicia o ciclo
-    runMatchCycle(activeBoard, score, level, 1);
+    // Delay curto para garantir que a renderização inicial da peça solta apareça
+    setTimeout(() => runMatchCycle(activeBoard, score, level, 1), 50);
   };
+
 
   const showAdAndRestart = async () => {
     const AD_UNIT_ID = 'ca-app-pub-2871403878275209/9050607747';
@@ -870,12 +857,11 @@ export default function App() {
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0, rotate: 45 }}
-                        className={`absolute inset-0 rounded-lg ${COLOR_MAP[cell.color]} relative`}
+                        className={`absolute inset-0 w-full h-full rounded-lg ${COLOR_MAP[cell.color]}`}
                       >
-                        {/* Brilho Glossy estilo Candy Crush */}
-                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
-                        <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
-                        <div className="absolute bottom-[5%] right-[5%] w-[20%] h-[20%] bg-black/10 rounded-full pointer-events-none" />
+                        {/* Brilho Glossy / Candy Crush Layers */}
+                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none rounded-lg z-10" />
+                        <div className="absolute top-[10%] left-[10%] w-[35%] h-[20%] bg-white/40 rounded-full blur-[1px] pointer-events-none z-20" />
                       </motion.div>
                     )}
                   </AnimatePresence>
