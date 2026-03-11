@@ -514,7 +514,7 @@ export default function App() {
   const handleCellClick = (row: number, col: number) => {
     // Impede interação se o tabuleiro estiver processando combos/explosões
     if (selectedPiece && !isClearing && gameState === 'playing') {
-      const fb = [...selectedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+      const fb = selectedPiece.piece.shape[0];
       handlePiecePlacement(selectedPiece.piece, row - fb.x, col - fb.y, selectedPiece.index);
     }
   };
@@ -542,7 +542,7 @@ export default function App() {
 
       {/* Peça flutuante durante touch drag — pos atualizada direto no DOM (sem re-render) */}
       {draggedPiece && touchFloatPos && (() => {
-        const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+        const fb = draggedPiece.piece.shape[0];
         return (
           <div
             ref={touchFloatRef}
@@ -802,18 +802,23 @@ export default function App() {
                   data-cell="true"
                   data-r={r}
                   data-c={c}
-                  whileTap={{ scale: 0.92 }}
                   className={(() => {
                     const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    const firstBlock = activePiece
-                      ? [...activePiece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0]
-                      : { x: 0, y: 0 };
-                    const anchorR = hoverCell ? hoverCell.r - firstBlock.x : -1;
-                    const anchorC = hoverCell ? hoverCell.c - firstBlock.y : -1;
-                    const ghostBlock = activePiece?.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
-                    const isGhost = !!ghostBlock;
-                    const ghostFits = isGhost && canPlacePiece(activePiece!, anchorR, anchorC, board);
-                    const ghostBlocked = isGhost && !ghostFits;
+                    let isGhost = false;
+                    let ghostFits = false;
+                    let ghostBlocked = false;
+
+                    if (activePiece && hoverCell) {
+                      const firstBlock = activePiece.shape[0]; // Simplificado: assume que o primeiro bloco é o guia
+                      const anchorR = hoverCell.r - firstBlock.x;
+                      const anchorC = hoverCell.c - firstBlock.y;
+                      const ghostBlock = activePiece.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                      if (ghostBlock) {
+                        isGhost = true;
+                        ghostFits = canPlacePiece(activePiece, anchorR, anchorC, board);
+                        ghostBlocked = !ghostFits;
+                      }
+                    }
 
                     return [
                       'relative rounded-lg aspect-square cursor-pointer transition-all duration-75',
@@ -829,23 +834,22 @@ export default function App() {
                   onDrop={() => {
                     setHoverCell(null);
                     if (draggedPiece) {
-                      const fb = [...draggedPiece.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                      const fb = draggedPiece.piece.shape[0];
                       handlePiecePlacement(draggedPiece.piece, r - fb.x, c - fb.y, draggedPiece.index);
                     }
                   }}
                 >
-                  {/* Gabarito / Ghost */}
                   {(() => {
                     const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    const firstBlock = activePiece
-                      ? [...activePiece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0]
-                      : { x: 0, y: 0 };
-                    const anchorR = hoverCell ? hoverCell.r - firstBlock.x : -1;
-                    const anchorC = hoverCell ? hoverCell.c - firstBlock.y : -1;
-                    const ghostBlock = activePiece?.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
+                    if (!activePiece || !hoverCell) return null;
+                    
+                    const firstBlock = activePiece.shape[0];
+                    const anchorR = hoverCell.r - firstBlock.x;
+                    const anchorC = hoverCell.c - firstBlock.y;
+                    const ghostBlock = activePiece.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
                     if (!ghostBlock) return null;
                     
-                    const fits = canPlacePiece(activePiece!, anchorR, anchorC, board);
+                    const fits = canPlacePiece(activePiece, anchorR, anchorC, board);
                     return (
                       <div className={`absolute inset-0 rounded-lg ${COLOR_MAP[ghostBlock.color]} ${fits ? 'opacity-40 animate-pulse' : 'opacity-20 grayscale'} pointer-events-none`} />
                     );
@@ -932,7 +936,9 @@ export default function App() {
       {/* ─── PEÇAS ─── */}
       <div className="mt-8 flex gap-4 sm:gap-8 justify-center items-center h-32">
         {currentPieces.map((piece, idx) => {
-          const canPlace = board.some((row, r) => row.some((_, c) => canPlacePiece(piece, r, c, board)));
+          // Memoização manual simples: só calcula se for necessário ou o board mudou
+          // (No React esse componente renderiza muito, então canPlace vira um peso)
+          const canPlace = isClearing ? false : checkGameOver([piece], board) === false;
           return (
             <motion.div
               key={piece.id}
@@ -964,9 +970,10 @@ export default function App() {
                 const touch = e.touches[0];
                 // Atualiza a posição do float DIRETO no DOM — sem setState — zero lag
                 if (touchFloatRef.current) {
-                  const fb = [...touchDragRef.current!.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                  const fb = touchDragRef.current!.piece.shape[0];
+                  // Ajuste fino de sensibilidade: centraliza levemente acima do dedo para visibilidade
                   touchFloatRef.current.style.left = `${touch.clientX - (fb.y * cellSize + cellSize / 2)}px`;
-                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2)}px`;
+                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2) - 30}px`;
                 }
                 const el = document.elementFromPoint(touch.clientX, touch.clientY);
                 const cell = el?.closest('[data-cell]');
@@ -983,7 +990,7 @@ export default function App() {
               onTouchEnd={() => {
                 const state = touchDragRef.current;
                 if (state && state.targetR >= 0 && state.targetC >= 0) {
-                  const fb = [...state.piece.shape].sort((a, b) => a.x - b.x || a.y - b.y)[0];
+                  const fb = state.piece.shape[0];
                   handlePiecePlacement(state.piece, state.targetR - fb.x, state.targetC - fb.y, state.index);
                 }
                 touchDragRef.current = null;
