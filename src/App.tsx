@@ -5,9 +5,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX } from 'lucide-react';
+import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX, Share2 } from 'lucide-react';
 import { Color, BoardCell, Piece } from './types';
-import { AdMob, InterstitialAdPluginEvents } from '@capacitor-community/admob';
+import { AdMob, InterstitialAdPluginEvents, BannerAdPosition } from '@capacitor-community/admob';
+import { Device } from '@capacitor/device';
+import { Share } from '@capacitor/share';
+import { supabase } from './lib/supabase';
 
 const BOARD_SIZE = 8;
 const BASE_COLORS: Color[] = ['red', 'blue', 'green', 'yellow', 'purple'];
@@ -233,17 +236,54 @@ export default function App() {
   useEffect(() => {
     const savedHighScore = localStorage.getItem('colorStackHighScore');
     if (savedHighScore) setHighScore(parseInt(savedHighScore));
-    const savedStats = localStorage.getItem('colorStackStats');
-    if (savedStats) setStats(JSON.parse(savedStats));
-
     // Inicializa AdMob no Startup (Nativo)
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+    
+    const syncCloudData = async () => {
+      try {
+        const id = await Device.getId();
+        const { data, error } = await supabase
+          .from('player_stats')
+          .select('high_score')
+          .eq('device_id', id.identifier)
+          .single();
+        
+        if (data && data.high_score > (parseInt(savedHighScore) || 0)) {
+          setHighScore(data.high_score);
+          localStorage.setItem('colorStackHighScore', data.high_score.toString());
+        }
+      } catch (err) {
+        console.log('Cloud sync fail:', err);
+      }
+    };
+
     if (isNative) {
-      AdMob.initialize({ initializeForTesting: true }).catch(err => console.log('AdMob Init Fail:', err));
+      syncCloudData();
+      const initAdMob = async () => {
+        try {
+          await AdMob.initialize({ initializeForTesting: true });
+          // Opcional: Solicitar consentimento (necessário para GDPR)
+          // await AdMob.requestConsentInfo();
+          
+          // Mostra um banner simples para TESTAR se a conexão AdMob está ativa
+          await AdMob.showBanner({
+            adId: 'ca-app-pub-3940256099942544/6300978111', // Test Banner
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 0,
+            isTesting: true
+          });
+        } catch (err) {
+          console.log('AdMob Startup Fail:', err);
+        }
+      };
+      initAdMob();
     }
   }, []);
 
-  const updateStats = useCallback((finalScore: number, finalLevel: number) => {
+  const updateStats = useCallback(async (finalScore: number, finalLevel: number) => {
+    let currentHighScore = parseInt(localStorage.getItem('colorStackHighScore') || '0');
+    if (finalScore > currentHighScore) currentHighScore = finalScore;
+
     setStats(prev => {
       const newStats = {
         gamesPlayed: prev.gamesPlayed + 1,
@@ -251,6 +291,25 @@ export default function App() {
         maxLevel: Math.max(prev.maxLevel, finalLevel),
       };
       localStorage.setItem('colorStackStats', JSON.stringify(newStats));
+
+      // Sincroniza com Supabase
+      const syncToCloud = async () => {
+        try {
+          const id = await Device.getId();
+          await supabase.from('player_stats').upsert({
+            device_id: id.identifier,
+            high_score: currentHighScore,
+            total_score: newStats.totalScore,
+            max_level: newStats.maxLevel,
+            games_played: newStats.gamesPlayed,
+            last_played: new Date().toISOString()
+          }, { onConflict: 'device_id' });
+        } catch (err) {
+          console.error('Supabase sync error:', err);
+        }
+      };
+      syncToCloud();
+
       return newStats;
     });
   }, []);
@@ -499,20 +558,41 @@ export default function App() {
 
 
   const showAdAndRestart = async () => {
-    const AD_UNIT_ID = 'ca-app-pub-2871403878275209/9050607747';
+    // ID do usuário (baseado na foto, parece ser App Open)
+    const USER_AD_UNIT_ID = 'ca-app-pub-2871403878275209/9050607747';
+    // ID de Teste do Google (sempre funciona)
+    const TEST_AD_UNIT_ID = 'ca-app-pub-3940256099942544/1033173712';
+    
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
 
     if (isNative) {
       try {
-        await AdMob.prepareInterstitial({ adId: AD_UNIT_ID });
+        // Tenta preparar o intersticial. Se o ID do usuário for de outro tipo (App Open), 
+        // o AdMob pode falhar aqui. Por isso o try/catch.
+        await AdMob.prepareInterstitial({ 
+          adId: USER_AD_UNIT_ID,
+          isTesting: true // Força modo teste para o ID do usuário também
+        });
         await AdMob.showInterstitial();
+        
         const listener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
           listener.remove();
           startNewGame();
         });
       } catch (err) {
-        console.error('AdMob Show Error:', err);
-        startNewGame();
+        console.warn('Production Ad failed, trying Test Ad...', err);
+        try {
+          // Fallback para ID de Teste universal do Google
+          await AdMob.prepareInterstitial({ adId: TEST_AD_UNIT_ID, isTesting: true });
+          await AdMob.showInterstitial();
+          const listener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+            listener.remove();
+            startNewGame();
+          });
+        } catch (finalErr) {
+          console.error('All Ads failed:', finalErr);
+          startNewGame();
+        }
       }
     } else {
       // Fallback no browser: simula o anúncio
@@ -531,6 +611,19 @@ export default function App() {
 
   const handlePieceClick = (piece: Piece, index: number) => {
     setSelectedPiece(selectedPiece?.index === index ? null : { piece, index });
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        title: 'Color Stack Puzzle',
+        text: `Fiz ${score} pontos na fase ${level} do Color Stack Puzzle! Consegue bater meu recorde? 🎮🔥`,
+        url: 'https://colorstackpuzzle.vercel.app/',
+        dialogTitle: 'Compartilhar com amigos',
+      });
+    } catch (err) {
+      console.error('Share error:', err);
+    }
   };
 
   const levelColor = LEVEL_COLORS[(level - 1) % LEVEL_COLORS.length];
@@ -931,13 +1024,22 @@ export default function App() {
               <h2 className="text-4xl font-display font-bold text-white mb-1">Game Over</h2>
               <p className="text-zinc-400 mb-1">Score: {score} pts</p>
               <p className="text-zinc-500 text-sm mb-6">Fase {level} concluída</p>
-              <button
-                onClick={showAdAndRestart}
-                className="bg-gradient-to-r from-sky-400 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-sky-500/30"
-              >
-                <RotateCcw className="w-5 h-5" />
-                Jogar de Novo
-              </button>
+              <div className="flex flex-col gap-3 w-full max-w-[200px]">
+                <button
+                  onClick={showAdAndRestart}
+                  className="bg-gradient-to-r from-sky-400 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-sky-500/30"
+                >
+                  <RotateCcw className="w-5 h-5" />
+                  Jogar de Novo
+                </button>
+                <button
+                  onClick={handleShare}
+                  className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/10"
+                >
+                  <Share2 className="w-5 h-5" />
+                  Compartilhar
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
