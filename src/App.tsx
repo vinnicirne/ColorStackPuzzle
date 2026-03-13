@@ -184,12 +184,58 @@ export default function App() {
     return SHAPES_BY_LEVEL[0];
   };
 
-  const generatePiece = useCallback((lvl: number = 1): Piece => {
+  const generatePiece = useCallback((lvl: number = 1, forceUsefulFor: BoardCell[][] | null = null): Piece => {
     const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
+    
+    // Tenta encontrar uma peça útil se solicitado
+    if (forceUsefulFor) {
+      // Tenta shapes aleatórios até encontrar um que caiba e faça match
+      const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
+      for (const shapeTemplate of shuffledShapes) {
+        // Tenta posições aleatórias no board
+        for (let attempt = 0; attempt < 15; attempt++) {
+          const r = Math.floor(Math.random() * BOARD_SIZE);
+          const c = Math.floor(Math.random() * BOARD_SIZE);
+          
+          if (shapeTemplate.every(([sx, sy]) => {
+            const tr = r + sx;
+            const tc = c + sy;
+            return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
+          })) {
+            // Cabe! Agora tenta atribuir cores que causem um match
+            const assigned: { x: number; y: number; color: Color }[] = [];
+            let causesMatch = false;
+            
+            for (const [sx, sy] of shapeTemplate) {
+              const tr = r + sx;
+              const tc = c + sy;
+              
+              // Verifica vizinhos no board para ver se podemos forçar um match
+              const boardNeighbors = [
+                { r: tr - 1, c: tc }, { r: tr + 1, c: tc },
+                { r: tr, c: tc - 1 }, { r: tr, c: tc + 1 }
+              ].filter(n => n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && forceUsefulFor[n.r][n.c]);
+
+              if (boardNeighbors.length > 0 && !causesMatch) {
+                const targetColor = forceUsefulFor[boardNeighbors[0].r][boardNeighbors[0].c]!.color;
+                assigned.push({ x: sx, y: sy, color: targetColor });
+                causesMatch = true;
+              } else {
+                assigned.push({ x: sx, y: sy, color: colors[Math.floor(Math.random() * colors.length)] });
+              }
+            }
+            
+            if (causesMatch) {
+              return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+            }
+          }
+        }
+      }
+    }
+
+    // Fallback para geração aleatória padrão
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
-    // Atribui cores evitando que blocos adjacentes na mesma peça tenham a mesma cor
-    // Isso previne auto-combinações (self-match) ao soltar a peça no tabuleiro
     const assigned: { x: number; y: number; color: Color }[] = [];
     for (const [x, y] of shapeTemplate) {
       const neighborColors = new Set(
@@ -507,9 +553,18 @@ export default function App() {
           }
 
           const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1 ? currentLevel + 1 : currentLevel;
+          const isLevelingUp = nextLevel > level;
+          let finalBoard = boardAfterGravity;
+
+          // SE SUBIR DE NÍVEL: Refresh no tabuleiro (limpa 60% das peças para dar alívio)
+          if (isLevelingUp) {
+            finalBoard = boardAfterGravity.map(row => 
+              row.map(cell => (Math.random() > 0.6 ? null : cell))
+            );
+          }
 
           setClearingCells(new Set());
-          setBoard(() => [...boardAfterGravity]);
+          setBoard(() => [...finalBoard]);
           setScore(nextScore);
 
           setTimeout(() => {
@@ -517,15 +572,23 @@ export default function App() {
           }, 800);
 
           // Recursão para cascatas
-          setTimeout(() => runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1), 150);
+          setTimeout(() => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1), 150);
         }, 350);
-
       } else {
         // Sem mais matches, finaliza rodada
         setIsClearing(false);
-        const finalPieces = remainingPieces.length === 0
-          ? [generatePiece(currentLevel), generatePiece(currentLevel), generatePiece(currentLevel)]
-          : remainingPieces;
+        
+        let finalPieces: Piece[];
+        if (remainingPieces.length === 0) {
+          // Garante que uma das 3 peças seja "útil" (caiba e faça match) para não travar o jogo
+          finalPieces = [
+            generatePiece(currentLevel, currentBoard), // A Pity Piece
+            generatePiece(currentLevel),
+            generatePiece(currentLevel)
+          ].sort(() => Math.random() - 0.5);
+        } else {
+          finalPieces = remainingPieces;
+        }
 
         setBoard(() => [...currentBoard]);
         setScore(currentScore);
@@ -617,9 +680,9 @@ export default function App() {
     try {
       await Share.share({
         title: 'Color Stack Puzzle',
-        text: `Fiz ${score} pontos na fase ${level} do Color Stack Puzzle! Consegue bater meu recorde? 🎮🔥`,
+        text: `Acabei de chegar na Fase ${level} com ${score} pontos no Color Stack Puzzle! 🚀🔥 Consegue superar minha estratégia? 🎮`,
         url: 'https://colorstackpuzzle.vercel.app/',
-        dialogTitle: 'Compartilhar com amigos',
+        dialogTitle: 'Compartilhar Conquista',
       });
     } catch (err) {
       console.error('Share error:', err);
