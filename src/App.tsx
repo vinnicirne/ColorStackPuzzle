@@ -735,9 +735,19 @@ export default function App() {
               </button>
             </div>
 
-            <div className="mt-12 text-zinc-600 text-xs flex items-center gap-2">
-              <Trophy className="w-3 h-3" />
-              MELHOR: {highScore} pts
+            <div className="mt-12 flex flex-col items-center gap-3">
+              <div className="text-zinc-600 text-xs flex items-center gap-2">
+                <Trophy className="w-3 h-3" />
+                MELHOR: {highScore} pts
+              </div>
+              <a 
+                href="/privacy.html" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-zinc-700 text-[10px] uppercase tracking-widest hover:text-zinc-500 transition-colors"
+              >
+                Política de Privacidade
+              </a>
             </div>
           </motion.div>
         )}
