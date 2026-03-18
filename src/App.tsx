@@ -61,7 +61,7 @@ const COLOR_MAP: Record<Color, string> = {
   yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(251,191,36,0.5)]',
   purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(139,92,246,0.5)]',
   orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(249,115,22,0.5)]',
-  rainbow: 'bg-[radial-gradient(circle,rgba(255,255,255,1)0%,rgba(56,189,248,1)30%,rgba(168,85,247,1)60%,rgba(244,63,94,1)100%)] animate-pulse shadow-[0_0_20px_white]',
+  rainbow: 'joker-rainbow block-shadow',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -122,6 +122,11 @@ function soundLevelUp(ctx: AudioContext) {
 function soundGameOver(ctx: AudioContext) {
   [440, 370, 311, 220].forEach((f, i) => {
     setTimeout(() => playTone(ctx, f, 0.3, 'sawtooth', 0.12), i * 120);
+  });
+}
+function soundSpecial(ctx: AudioContext) {
+  [523, 659, 783, 1046].forEach((f, i) => {
+    setTimeout(() => playTone(ctx, f, 0.12, 'triangle', 0.2), i * 50);
   });
 }
 
@@ -198,6 +203,11 @@ export default function App() {
   const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false, simplifyShapes: boolean = false): Piece => {
     const shapes = simplifyShapes ? SHAPES_BY_LEVEL[0] : getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
+    
+    // Performance: Calcula ocupação uma vez por chamada de geração
+    const occCount = boardToUpdate ? boardToUpdate.flat().filter(x => x).length : 0;
+    const occupancy = boardToUpdate ? occCount / 64 : 0;
+    const isJokerEra = occupancy > 0.8;
 
     const finalizeAt = (p: Piece, row: number, col: number) => {
       if (boardToUpdate) {
@@ -255,13 +265,16 @@ export default function App() {
                   if (foundNeighbor && !fallbackColor) fallbackColor = tCol;
                 }
 
-                const fCol = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
+                // UPGRADE JOKER: Se em crise, chance da cor de match virar Coringa (Rainbow)
+                const fCol = (forceMatch && isJokerEra && Math.random() > 0.7) 
+                  ? 'rainbow' 
+                  : (bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)]);
+
                 shapeTemplate.forEach(([sx, sy]) => {
                   let bColor = colors[Math.floor(Math.random() * colors.length)];
-                  // Se o bloco toca um vizinho da cor alvo no boardToUpdate, usa a cor de match
                   const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
                     .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === fCol);
-                  if (isBridge) bColor = fCol;
+                  if (isBridge || fCol === 'rainbow') bColor = fCol as Color;
                   assigned.push({ x: sx, y: sy, color: bColor });
                 });
                 const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
@@ -343,12 +356,11 @@ export default function App() {
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
           if (boardToUpdate[r][c] === null) {
-            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r+1,c:c}]
+            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
               .filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
             
-            // Crie um Coringa (Rainbow) em situações de extrema urgência (0.15% de chance ou lotado)
-            const isCrisis = (boardToUpdate.flat().filter(x=>x).length / (BOARD_SIZE*BOARD_SIZE)) > 0.85;
-            const isJoker = isCrisis && Math.random() > 0.8;
+            // Crie um Coringa em situações de extrema urgência baseada no cache de ocupação
+            const isJoker = isJokerEra && Math.random() > 0.75;
             
             const tColor = isJoker ? 'rainbow' : (neighbors.length > 0 ? boardToUpdate[neighbors[0].r][neighbors[0].c]!.color : colors[Math.floor(Math.random() * colors.length)]);
             const p = { id: isJoker ? 'joker-' + Math.random().toString(36).substr(2, 4) : 'pity-fix', shape: [{ x: 0, y: 0, color: tColor as Color }] };
@@ -573,7 +585,12 @@ export default function App() {
                   if (nr>=0&&nr<BOARD_SIZE&&nc>=0&&nc<BOARD_SIZE&&currentBoard[nr][nc]) starRange.push({r:nr, c:nc});
                 }
               }
-              starRange.forEach(cell => { if (!group.some(ex => ex.r===cell.r && ex.c===cell.c)) group.push(cell); });
+              starRange.forEach(cell => { 
+                if (!group.some(ex => ex.r===cell.r && ex.c===cell.c)) {
+                  group.push(cell);
+                  visited[cell.r][cell.c] = true; // Marca como visitado para evitar re-processamento do mesmo grupo
+                }
+              });
             }
             matchGroups.push(group);
           }
@@ -699,12 +716,18 @@ export default function App() {
         setTimeout(() => setIsShaking(false), 300);
         if (ctx) soundClear(ctx);
 
-        if (combo > 1) setComboText(`COMBO X${combo}! 🔥`);
-        else {
+        if (combo > 1) {
+          setComboText(`COMBO X${combo}! 🔥`);
+          if (ctx) soundSpecial(ctx);
+        } else {
           const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-          if (totalMatched > 5) setComboText('AMAZING! 🔥');
-          else if (totalMatched > 3) setComboText('GREAT! ⭐');
-          else setComboText('CLEAR!');
+          if (totalMatched > 5) {
+            setComboText('AMAZING! 🔥');
+            if (ctx) soundSpecial(ctx);
+          } else if (totalMatched > 3) {
+            setComboText('GREAT! ⭐');
+            if (ctx) soundSpecial(ctx);
+          } else setComboText('CLEAR!');
         }
         
         setTimeout(() => setComboText(null), 1000);

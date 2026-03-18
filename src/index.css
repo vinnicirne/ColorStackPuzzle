@@ -40,5 +40,17 @@
   .animate-pulse-glow {
     animation: pulse-glow 2s infinite ease-in-out;
   }
+
+  .joker-rainbow {
+    background: radial-gradient(circle, #fff 0%, #38bdf8 25%, #a855f7 50%, #f43f5e 75%, #fff 100%);
+    background-size: 200% 200%;
+    animation: joker-anim 1.5s infinite alternate ease-in-out, pulse 1.5s infinite;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.8), inset 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+
+  @keyframes joker-anim {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 100% 100%; }
+  }
 }
 
