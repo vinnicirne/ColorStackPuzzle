@@ -7,13 +7,22 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX, Share2 } from 'lucide-react';
 import { Color, BoardCell, Piece } from './types';
-import { AdMob, InterstitialAdPluginEvents, BannerAdPosition } from '@capacitor-community/admob';
+import { AdMob, InterstitialAdPluginEvents, BannerAdPosition, RewardAdPluginEvents } from '@capacitor-community/admob';
 import { Device } from '@capacitor/device';
 import { Share } from '@capacitor/share';
 import { supabase } from './lib/supabase';
 
 const BOARD_SIZE = 8;
 const BASE_COLORS: Color[] = ['red', 'blue', 'green', 'yellow', 'purple'];
+
+// ID dos Anúncios AdMob (Produção)
+const AD_UNITS = {
+  BANNER: 'ca-app-pub-2871403878275209/9050607747', // Banner no rodapé (usando ID anterior ou novo se preferir, assumindo este como banner)
+  INTERSTITIAL: 'ca-app-pub-2871403878275209/6370383756',
+  REWARDED: 'ca-app-pub-2871403878275209/8809545537',
+  APP_OPEN: 'ca-app-pub-2871403878275209/2407088016',
+  NATIVE: 'ca-app-pub-2871403878275209/2371428993'
+};
 
 // Shapes desbloqueadas por nível
 const SHAPES_BY_LEVEL = [
@@ -150,6 +159,7 @@ export default function App() {
   const touchFloatRef = useRef<HTMLDivElement | null>(null);
   // Ref para evitar setHoverCell redundante quando o dedo/cursor não mudou de célula
   const hoverCellRef = useRef<{ r: number; c: number } | null>(null);
+  const cascadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const setHoverCellFast = (next: { r: number; c: number } | null) => {
     if (next === null) {
       if (hoverCellRef.current !== null) { hoverCellRef.current = null; setHoverCell(null); }
@@ -184,7 +194,7 @@ export default function App() {
     return SHAPES_BY_LEVEL[0];
   };
 
-  const generatePiece = useCallback((lvl: number = 1, forceUsefulFor: BoardCell[][] | null = null): Piece => {
+  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null): Piece => {
     const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
     
@@ -192,46 +202,93 @@ export default function App() {
     if (forceUsefulFor) {
       // Tenta shapes aleatórios até encontrar um que caiba e faça match
       const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
-      for (const shapeTemplate of shuffledShapes) {
-        // Tenta posições aleatórias no board
-        for (let attempt = 0; attempt < 15; attempt++) {
-          const r = Math.floor(Math.random() * BOARD_SIZE);
-          const c = Math.floor(Math.random() * BOARD_SIZE);
-          
-          if (shapeTemplate.every(([sx, sy]) => {
-            const tr = r + sx;
-            const tc = c + sy;
-            return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
-          })) {
-            // Cabe! Agora tenta atribuir cores que causem um match
-            const assigned: { x: number; y: number; color: Color }[] = [];
-            let causesMatch = false;
-            
-            for (const [sx, sy] of shapeTemplate) {
-              const tr = r + sx;
-              const tc = c + sy;
-              
-              // Verifica vizinhos no board para ver se podemos forçar um match
-              const boardNeighbors = [
-                { r: tr - 1, c: tc }, { r: tr + 1, c: tc },
-                { r: tr, c: tc - 1 }, { r: tr, c: tc + 1 }
-              ].filter(n => n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && forceUsefulFor[n.r][n.c]);
+      let firstFoundPiece: Piece | null = null;
 
-              if (boardNeighbors.length > 0 && !causesMatch) {
-                const targetColor = forceUsefulFor[boardNeighbors[0].r][boardNeighbors[0].c]!.color;
-                assigned.push({ x: sx, y: sy, color: targetColor });
-                causesMatch = true;
-              } else {
-                assigned.push({ x: sx, y: sy, color: colors[Math.floor(Math.random() * colors.length)] });
+      for (const shapeTemplate of shuffledShapes) {
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          for (let c = 0; c < BOARD_SIZE; c++) {
+            if (shapeTemplate.every(([sx, sy]) => {
+              const tr = r + sx; const tc = c + sy;
+              return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
+            })) {
+              const assigned: { x: number; y: number; color: Color }[] = [];
+              let bestMatchedColor: Color | null = null;
+              let fallbackColor: Color | null = null;
+              const pieceLength = shapeTemplate.length;
+
+              for (const [sx, sy] of shapeTemplate) {
+                const tr = r + sx; const tc = c + sy;
+                const neighbors = [{ r: tr - 1, c: tc }, { r: tr + 1, c: tc }, { r: tr, c: tc - 1 }, { r: tr, c: tc + 1 }]
+                  .filter(n => n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && forceUsefulFor[n.r][n.c]);
+
+                const counts: Record<string, number> = {};
+                neighbors.forEach(n => { const col = forceUsefulFor[n.r][n.c]!.color; counts[col] = (counts[col] || 0) + 1; });
+                const matchCol = Object.keys(counts).find(col => counts[col] + pieceLength >= 3);
+                if (matchCol) { bestMatchedColor = matchCol as Color; break; }
+                if (neighbors.length > 0 && !fallbackColor) fallbackColor = forceUsefulFor[neighbors[0].r][neighbors[0].c]!.color;
               }
-            }
-            
-            if (causesMatch) {
-              return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+
+              const finalColor = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
+              shapeTemplate.forEach(([sx, sy]) => {
+                assigned.push({ x: sx, y: sy, color: finalColor });
+              });
+
+              const newPiece = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+              
+              const finalize = (p: Piece) => {
+                if (boardToUpdate) {
+                  p.shape.forEach(b => {
+                    if (boardToUpdate[r + b.x] && r + b.x < BOARD_SIZE) 
+                      boardToUpdate[r + b.x][c + b.y] = { id: 'reserved', color: 'red' };
+                  });
+                }
+                return p;
+              };
+
+              if (bestMatchedColor) return finalize(newPiece);
+              if (!firstFoundPiece) firstFoundPiece = newPiece;
             }
           }
         }
       }
+      if (firstFoundPiece) return firstFoundPiece;
+
+      let firstSurvival: Piece | null = null;
+      if (lvl > 1) {
+        const basicShapes = [...SHAPES_BY_LEVEL[0]].sort(() => Math.random() - 0.5);
+        for (const shapeTemplate of basicShapes) {
+          for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+              if (shapeTemplate.every(([sx, sy]) => {
+                const tr = r + sx; const tc = c + sy;
+                return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
+              })) {
+                const assigned: { x: number; y: number; color: Color }[] = [];
+                let bestColor: Color | null = null;
+                let fbColor: Color | null = null;
+                const pLen = shapeTemplate.length;
+
+                for (const [sx, sy] of shapeTemplate) {
+                  const tr = r + sx; const tc = c + sy;
+                  const neighbors = [{r:tr-1,c:tc},{r:tr+1,c:tc},{r:tr,c:tc-1},{r:tr,c:tc+1}].filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&forceUsefulFor[n.r][n.c]);
+                  const counts: Record<string, number> = {};
+                  neighbors.forEach(n => { const col = forceUsefulFor[n.r][n.c]!.color; counts[col] = (counts[col] || 0) + 1; });
+                  const matchCol = Object.keys(counts).find(col => counts[col] + pLen >= 3);
+                  if (matchCol) { bestColor = matchCol as Color; break; }
+                  if (neighbors.length > 0 && !fbColor) fbColor = forceUsefulFor[neighbors[0].r][neighbors[0].c]!.color;
+                }
+
+                const fColor = bestColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
+                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: fColor }));
+                const p = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+                if (bestColor) return p;
+                if (!firstSurvival) firstSurvival = p;
+              }
+            }
+          }
+        }
+      }
+      if (firstSurvival) return firstSurvival;
     }
 
     // Fallback para geração aleatória padrão
@@ -255,6 +312,7 @@ export default function App() {
   }, []);
 
   const startNewGame = useCallback(() => {
+    if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
     setBoard(Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)));
     setLevel(1);
     setScore(0);
@@ -282,6 +340,21 @@ export default function App() {
   useEffect(() => {
     const savedHighScore = localStorage.getItem('colorStackHighScore');
     if (savedHighScore) setHighScore(parseInt(savedHighScore));
+    
+    // Carrega estatísticas e progresso ativo
+    const savedStats = localStorage.getItem('colorStackStats');
+    if (savedStats) setStats(JSON.parse(savedStats));
+    
+    const savedLevel = localStorage.getItem('colorStackLevel');
+    const savedScore = localStorage.getItem('colorStackScore');
+    const savedBoard = localStorage.getItem('colorStackBoard');
+    const savedPieces = localStorage.getItem('colorStackPieces');
+    
+    if (savedLevel) setLevel(parseInt(savedLevel));
+    if (savedScore) setScore(parseInt(savedScore));
+    if (savedBoard) setBoard(JSON.parse(savedBoard));
+    if (savedPieces) setCurrentPieces(JSON.parse(savedPieces));
+    
     // Inicializa AdMob no Startup (Nativo)
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
     
@@ -307,17 +380,21 @@ export default function App() {
       syncCloudData();
       const initAdMob = async () => {
         try {
-          await AdMob.initialize({ initializeForTesting: true });
-          // Opcional: Solicitar consentimento (necessário para GDPR)
-          // await AdMob.requestConsentInfo();
+          // Inicializa AdMob para PRODUÇÃO
+          await AdMob.initialize({ initializeForTesting: false });
           
-          // Mostra um banner simples para TESTAR se a conexão AdMob está ativa
+          // Mostra o Banner de Produção no rodapé
           await AdMob.showBanner({
-            adId: 'ca-app-pub-3940256099942544/6300978111', // Test Banner
+            adId: AD_UNITS.BANNER,
             position: BannerAdPosition.BOTTOM_CENTER,
             margin: 0,
-            isTesting: true
+            isTesting: false
           });
+
+          // Prepara anúncio de abertura
+          // Nota: O plugin atual pode não ter suporte direto nativo para App Open via JS dependendo da versão,
+          // mas preparamos o Interstitial como fallback ou exploramos se o ID funciona como Interstitial.
+          // Para Color Stack, o App Open geralmente é tratado no carregamento nativo.
         } catch (err) {
           console.log('AdMob Startup Fail:', err);
         }
@@ -326,9 +403,23 @@ export default function App() {
     }
   }, []);
 
+  // Grava progresso automaticamente
+  useEffect(() => {
+    if (gameState === 'playing' || gameState === 'levelup' || gameState === 'gameover') {
+      localStorage.setItem('colorStackLevel', level.toString());
+      localStorage.setItem('colorStackScore', score.toString());
+      localStorage.setItem('colorStackBoard', JSON.stringify(board));
+      localStorage.setItem('colorStackPieces', JSON.stringify(currentPieces));
+    }
+  }, [level, score, board, currentPieces, gameState]);
+
   const updateStats = useCallback(async (finalScore: number, finalLevel: number) => {
     let currentHighScore = parseInt(localStorage.getItem('colorStackHighScore') || '0');
-    if (finalScore > currentHighScore) currentHighScore = finalScore;
+    if (finalScore > currentHighScore) {
+      currentHighScore = finalScore;
+      localStorage.setItem('colorStackHighScore', currentHighScore.toString());
+      setHighScore(currentHighScore);
+    }
 
     setStats(prev => {
       const newStats = {
@@ -474,8 +565,9 @@ export default function App() {
   };
 
   const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
-    // Bloqueia se já estiver processando ou se a posição for inválida
+    // Bloqueia IMEDIATAMENTE para evitar cliques simultâneos e corrupção de estado
     if (isClearing || !canPlacePiece(piece, row, col, board)) return;
+    setIsClearing(true);
 
     const ctx = await getAudio();
     if (ctx) soundPlace(ctx);
@@ -499,7 +591,6 @@ export default function App() {
       const matchGroups = findMatches(currentBoard);
 
       if (matchGroups.length > 0) {
-        setIsClearing(true);
         const toFlash = new Set<string>();
         const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
         let iterationScore = 0;
@@ -552,16 +643,8 @@ export default function App() {
             localStorage.setItem('colorStackHighScore', nextScore.toString());
           }
 
-          const nextLevel = Math.floor(nextScore / levelThreshold(currentLevel)) >= 1 ? currentLevel + 1 : currentLevel;
-          const isLevelingUp = nextLevel > level;
-          let finalBoard = boardAfterGravity;
-
-          // SE SUBIR DE NÍVEL: Refresh no tabuleiro (limpa 60% das peças para dar alívio)
-          if (isLevelingUp) {
-            finalBoard = boardAfterGravity.map(row => 
-              row.map(cell => (Math.random() > 0.6 ? null : cell))
-            );
-          }
+          const nextLevel = Math.max(currentLevel, Math.floor(nextScore / 300) + 1);
+          const finalBoard = boardAfterGravity;
 
           setClearingCells(new Set());
           setBoard(() => [...finalBoard]);
@@ -572,25 +655,45 @@ export default function App() {
           }, 800);
 
           // Recursão para cascatas
-          setTimeout(() => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1), 150);
+          if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
+          cascadeTimeoutRef.current = setTimeout(() => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1), 150);
         }, 350);
       } else {
         // Sem mais matches, finaliza rodada
         setIsClearing(false);
         
+        let actualBoard = currentBoard;
+        if (currentLevel > level) {
+          // Refresh no tabuleiro ao subir de nível (limpa 40% das peças para dar alívio/estratégia)
+          actualBoard = currentBoard.map(row => 
+            row.map(cell => (Math.random() > 0.6 ? null : cell))
+          );
+        }
+
         let finalPieces: Piece[];
         if (remainingPieces.length === 0) {
-          // Garante que uma das 3 peças seja "útil" (caiba e faça match) para não travar o jogo
-          finalPieces = [
-            generatePiece(currentLevel, currentBoard), // A Pity Piece
-            generatePiece(currentLevel),
-            generatePiece(currentLevel)
-          ].sort(() => Math.random() - 0.5);
+          const occupiedCount = actualBoard.flat().filter(c => c).length;
+          const isCrowded = occupiedCount > (BOARD_SIZE * BOARD_SIZE * 0.6);
+          
+          // Geração Sequencial Real: Cada peça subsequente ocupa um espaço físico no board virtual
+          const simBoard = actualBoard.map(row => [...row]);
+          const pieces: Piece[] = [];
+          
+          // Peça 1: Sempre útil. Marca o simBoard.
+          pieces.push(generatePiece(currentLevel, simBoard));
+
+          // Peça 2: Útil se estiver lotado (Crowded), em um ESPAÇO DIFERENTE da Peça 1.
+          pieces.push(generatePiece(currentLevel, isCrowded ? simBoard : null));
+
+          // Peça 3: Aleatória (pode ser útil se sobrar espaço no simBoard)
+          pieces.push(generatePiece(currentLevel, null));
+
+          finalPieces = pieces.sort(() => Math.random() - 0.5);
         } else {
           finalPieces = remainingPieces;
         }
 
-        setBoard(() => [...currentBoard]);
+        setBoard(() => [...actualBoard]);
         setScore(currentScore);
         setCurrentPieces(() => [...finalPieces]);
 
@@ -598,15 +701,28 @@ export default function App() {
           if (ctx) soundLevelUp(ctx);
           setLevel(currentLevel);
           setGameState('levelup');
+          
+          // Troca de fase: Mostra Intersticial
+          const showPhaseAd = async () => {
+            const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+            if (isNative) {
+              try {
+                await AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false });
+                await AdMob.showInterstitial();
+              } catch (e) { console.error('Phase Ad fail', e); }
+            }
+          };
+          showPhaseAd();
+
           setPendingAfterLevel(() => () => {
             setGameState('playing');
-            if (checkGameOver(finalPieces, currentBoard)) {
+            if (checkGameOver(finalPieces, actualBoard)) {
               setGameState('gameover');
               updateStats(currentScore, currentLevel);
             }
           });
         } else {
-          if (checkGameOver(finalPieces, currentBoard)) {
+          if (checkGameOver(finalPieces, actualBoard)) {
             if (ctx) soundGameOver(ctx);
             setGameState('gameover');
             updateStats(currentScore, currentLevel);
@@ -630,11 +746,9 @@ export default function App() {
 
     if (isNative) {
       try {
-        // Tenta preparar o intersticial. Se o ID do usuário for de outro tipo (App Open), 
-        // o AdMob pode falhar aqui. Por isso o try/catch.
         await AdMob.prepareInterstitial({ 
-          adId: USER_AD_UNIT_ID,
-          isTesting: true // Força modo teste para o ID do usuário também
+          adId: AD_UNITS.INTERSTITIAL,
+          isTesting: false
         });
         await AdMob.showInterstitial();
         
@@ -643,19 +757,8 @@ export default function App() {
           startNewGame();
         });
       } catch (err) {
-        console.warn('Production Ad failed, trying Test Ad...', err);
-        try {
-          // Fallback para ID de Teste universal do Google
-          await AdMob.prepareInterstitial({ adId: TEST_AD_UNIT_ID, isTesting: true });
-          await AdMob.showInterstitial();
-          const listener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-            listener.remove();
-            startNewGame();
-          });
-        } catch (finalErr) {
-          console.error('All Ads failed:', finalErr);
-          startNewGame();
-        }
+        console.error('Production Interstitial failed:', err);
+        startNewGame();
       }
     } else {
       // Fallback no browser: simula o anúncio
@@ -690,7 +793,7 @@ export default function App() {
   };
 
   const levelColor = LEVEL_COLORS[(level - 1) % LEVEL_COLORS.length];
-  const levelProgress = Math.min((score - (level - 1) * 300) / 300, 1);
+  const levelProgress = Math.max(0, Math.min((score - (level - 1) * 300) / 300, 1));
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden font-sans">
@@ -775,7 +878,14 @@ export default function App() {
 
             <div className="flex flex-col gap-4 w-full max-w-xs">
               <button
-                onClick={startNewGame}
+                onClick={() => {
+                  // Se houver progresso, apenas entra no jogo. Caso contrário, começa do zero.
+                  if (currentPieces.length > 0 && (score > 0 || board.some(row => row.some(cell => cell !== null)))) {
+                    setGameState('playing');
+                  } else {
+                    startNewGame();
+                  }
+                }}
                 className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-400 hover:to-purple-500 text-white py-5 rounded-3xl font-display font-bold text-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(232,121,249,0.4)] flex items-center justify-center gap-3 relative overflow-hidden group"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
