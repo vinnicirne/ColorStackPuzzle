@@ -61,6 +61,7 @@ const COLOR_MAP: Record<Color, string> = {
   yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(251,191,36,0.5)]',
   purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(139,92,246,0.5)]',
   orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(249,115,22,0.5)]',
+  rainbow: 'bg-[radial-gradient(circle,rgba(255,255,255,1)0%,rgba(56,189,248,1)30%,rgba(168,85,247,1)60%,rgba(244,63,94,1)100%)] animate-pulse shadow-[0_0_20px_white]',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -195,8 +196,7 @@ export default function App() {
   };
 
   const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false, simplifyShapes: boolean = false): Piece => {
-    const rawShapes = simplifyShapes ? SHAPES_BY_LEVEL[0] : getAvailableShapes(lvl);
-    const shapes = [...rawShapes];
+    const shapes = simplifyShapes ? SHAPES_BY_LEVEL[0] : getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
 
     const finalizeAt = (p: Piece, row: number, col: number) => {
@@ -232,7 +232,7 @@ export default function App() {
                 let fallbackColor: Color | null = null;
 
                 for (const tCol of colors) {
-                  let totalClusterSize = pLen;
+                  let totalClusterSize = 1; // Começa em 1 (o bloco atual que toca o vizinho)
                   const v = new Set<string>();
                   const q: {r:number, c:number}[] = [];
                   shapeTemplate.forEach(([sx,sy]) => { q.push({r:r+sx, c:c+sy}); v.add(`${r+sx}-${c+sy}`); });
@@ -250,18 +250,27 @@ export default function App() {
                       }
                     });
                   }
+                  // Só considera Match Útil se a peça ajudar a completar (ou seja, se a soma com vizinhos for >= 3)
                   if (totalClusterSize >= 3 && foundNeighbor) { bestMatchedColor = tCol; break; }
                   if (foundNeighbor && !fallbackColor) fallbackColor = tCol;
                 }
 
-                const finalColor = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
-                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: finalColor }));
+                const fCol = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
+                shapeTemplate.forEach(([sx, sy]) => {
+                  let bColor = colors[Math.floor(Math.random() * colors.length)];
+                  // Se o bloco toca um vizinho da cor alvo no boardToUpdate, usa a cor de match
+                  const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
+                    .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === fCol);
+                  if (isBridge) bColor = fCol;
+                  assigned.push({ x: sx, y: sy, color: bColor });
+                });
                 const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
                 if (bestMatchedColor) return finalizeAt(newP, r, c);
                 if (!bestMatchFound) bestMatchFound = { p: newP, r, c };
               } else {
-                const rndColor = colors[Math.floor(Math.random() * colors.length)];
-                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: rndColor }));
+                shapeTemplate.forEach(([sx, sy]) => {
+                  assigned.push({ x: sx, y: sy, color: colors[Math.floor(Math.random() * colors.length)] });
+                });
                 return finalizeAt({ id: Math.random().toString(36).substr(2, 9), shape: assigned }, r, c);
               }
             }
@@ -312,8 +321,14 @@ export default function App() {
                   }
                   if (bColor) break;
                 }
-                const fColor = bColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
-                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: fColor }));
+                const sCol = bColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
+                shapeTemplate.forEach(([sx, sy]) => {
+                  let bc = colors[Math.floor(Math.random() * colors.length)];
+                  const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
+                    .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === sCol);
+                  if (isBridge) bc = sCol;
+                  assigned.push({ x: sx, y: sy, color: bc });
+                });
                 const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
                 if (bColor) return finalizeAt(newP, r, c);
                 if (!survivalFound) survivalFound = { p: newP, r, c };
@@ -324,14 +339,19 @@ export default function App() {
         if (survivalFound) return finalizeAt(survivalFound.p, survivalFound.r, survivalFound.c);
       }
 
-      // 3. ABSOLUTE PITY (1x1 INTELIGENTE)
+      // 3. ABSOLUTE PITY (1x1 INTELIGENTE / CORINGA)
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
           if (boardToUpdate[r][c] === null) {
-            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
+            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r+1,c:c}]
               .filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
-            const tColor = neighbors.length > 0 ? boardToUpdate[neighbors[0].r][neighbors[0].c]!.color : colors[Math.floor(Math.random() * colors.length)];
-            const p = { id: 'pity-fix', shape: [{ x: 0, y: 0, color: tColor }] };
+            
+            // Crie um Coringa (Rainbow) em situações de extrema urgência (0.15% de chance ou lotado)
+            const isCrisis = (boardToUpdate.flat().filter(x=>x).length / (BOARD_SIZE*BOARD_SIZE)) > 0.85;
+            const isJoker = isCrisis && Math.random() > 0.8;
+            
+            const tColor = isJoker ? 'rainbow' : (neighbors.length > 0 ? boardToUpdate[neighbors[0].r][neighbors[0].c]!.color : colors[Math.floor(Math.random() * colors.length)]);
+            const p = { id: isJoker ? 'joker-' + Math.random().toString(36).substr(2, 4) : 'pity-fix', shape: [{ x: 0, y: 0, color: tColor as Color }] };
             return finalizeAt(p, r, c);
           }
         }
@@ -341,8 +361,9 @@ export default function App() {
     // 4. GERAÇÃO ALEATÓRIA PADRÃO (FALLBACK GERAL)
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
     const assigned: { x: number; y: number; color: Color }[] = [];
-    const mainColor = colors[Math.floor(Math.random() * colors.length)];
-    shapeTemplate.forEach(([x, y]) => assigned.push({ x, y, color: mainColor }));
+    shapeTemplate.forEach(([x, y]) => {
+      assigned.push({ x, y, color: colors[Math.floor(Math.random() * colors.length)] });
+    });
     return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
   }, []);
 
@@ -351,7 +372,7 @@ export default function App() {
     setBoard(Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)));
     setLevel(1);
     setScore(0);
-    setCurrentPieces([generatePiece(1), generatePiece(1), generatePiece(1)]);
+    setCurrentPieces([generatePiece(1, null, false), generatePiece(1, null, false), generatePiece(1, null, false)]);
     setGameState('playing');
     setIsClearing(false);
     setSelectedPiece(null);
@@ -524,14 +545,38 @@ export default function App() {
               { r: currR, c: currC - 1 }, { r: currR, c: currC + 1 },
             ];
             for (const n of neighbors) {
-              if (n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE &&
-                !visited[n.r][n.c] && currentBoard[n.r][n.c]?.color === color) {
-                visited[n.r][n.c] = true;
-                queue.push(n);
+              if (n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && !visited[n.r][n.c]) {
+                const neighborCell = currentBoard[n.r][n.c];
+                // Rainbow (Coringa) se adapta ou o nó atual é rainbow e assume o vizinho
+                const colorsMatch = neighborCell?.color === color || neighborCell?.color === 'rainbow' || color === 'rainbow';
+                if (neighborCell && colorsMatch) {
+                  visited[n.r][n.c] = true;
+                  queue.push(n);
+                }
               }
             }
           }
-          if (group.length >= 3) matchGroups.push(group);
+          if (group.length >= 3) {
+            // Logica Especial Coringa: Se houver um 'rainbow' ativo, expande explosão em estrela
+            const hasJoker = group.some(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow');
+            if (hasJoker) {
+              const jokerPos = group.find(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow')!;
+              const starRange = [];
+              for (let i = 0; i < BOARD_SIZE; i++) {
+                // Cross (+)
+                if (currentBoard[jokerPos.r][i]) starRange.push({r: jokerPos.r, c: i});
+                if (currentBoard[i][jokerPos.c]) starRange.push({r: i, c: jokerPos.c});
+                // Diagonais (X)
+                const dr = [+1, +1, -1, -1]; const dc = [+1, -1, +1, -1];
+                for (let d = 0; d < 4; d++) {
+                  const nr = jokerPos.r + i * dr[d]; const nc = jokerPos.c + i * dc[d];
+                  if (nr>=0&&nr<BOARD_SIZE&&nc>=0&&nc<BOARD_SIZE&&currentBoard[nr][nc]) starRange.push({r:nr, c:nc});
+                }
+              }
+              starRange.forEach(cell => { if (!group.some(ex => ex.r===cell.r && ex.c===cell.c)) group.push(cell); });
+            }
+            matchGroups.push(group);
+          }
         }
       }
     }
@@ -597,6 +642,7 @@ export default function App() {
     yellow: '#fbbf24',
     purple: '#c084fc',
     orange: '#fb923c',
+    rainbow: '#ffffff',
   };
 
   const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
@@ -714,12 +760,10 @@ export default function App() {
           const simBoard = actualBoard.map(row => [...row]);
           const pieces: Piece[] = [];
           
-          // CRIAÇÃO DE CURVA DINÂMICA DE AJUDA (PITY SYSTEM 2.0)
-          // Nível 1: Match Garantido (Sempre para a primeira peça se > 50% ou forçado)
-          const p1Match = occupancy > 0.5;
-          const p2Match = occupancy > 0.65;
-          const p3Match = occupancy > 0.8;
-          const simplify = occupancy > 0.85; // Se estiver quase morrendo, dê peças pequenas
+          const p1Match = occupancy > 0.65;
+          const p2Match = occupancy > 0.8;
+          const p3Match = occupancy > 0.9;
+          const simplify = occupancy > 0.85;
 
           pieces.push(generatePiece(currentLevel, simBoard, p1Match, simplify));
           pieces.push(generatePiece(currentLevel, simBoard, p2Match, simplify));
