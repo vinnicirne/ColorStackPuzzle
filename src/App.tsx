@@ -194,121 +194,156 @@ export default function App() {
     return SHAPES_BY_LEVEL[0];
   };
 
-  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null): Piece => {
-    const shapes = getAvailableShapes(lvl);
+  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false, simplifyShapes: boolean = false): Piece => {
+    const rawShapes = simplifyShapes ? SHAPES_BY_LEVEL[0] : getAvailableShapes(lvl);
+    const shapes = [...rawShapes];
     const colors = getAvailableColors(lvl);
+
+    const finalizeAt = (p: Piece, row: number, col: number) => {
+      if (boardToUpdate) {
+        p.shape.forEach(b => {
+          const tr = row + b.x; const tc = col + b.y;
+          if (tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE) {
+            boardToUpdate[tr][tc] = { id: 'reserved', color: b.color };
+          }
+        });
+      }
+      return p;
+    };
     
-    // Tenta encontrar uma peça útil se solicitado
-    if (forceUsefulFor) {
-      // Tenta shapes aleatórios até encontrar um que caiba e faça match
+    // 1. TENTATIVA DE GERAÇÃO INTELIGENTE (RESERVA DE ESPAÇO)
+    if (boardToUpdate) {
       const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
-      let firstFoundPiece: Piece | null = null;
+      let firstSpotFound: { p: Piece; r: number; c: number } | null = null;
+      let bestMatchFound: { p: Piece; r: number; c: number } | null = null;
 
       for (const shapeTemplate of shuffledShapes) {
         for (let r = 0; r < BOARD_SIZE; r++) {
           for (let c = 0; c < BOARD_SIZE; c++) {
             if (shapeTemplate.every(([sx, sy]) => {
               const tr = r + sx; const tc = c + sy;
-              return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
+              return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && boardToUpdate[tr][tc] === null;
             })) {
               const assigned: { x: number; y: number; color: Color }[] = [];
-              let bestMatchedColor: Color | null = null;
-              let fallbackColor: Color | null = null;
-              const pieceLength = shapeTemplate.length;
+              const pLen = shapeTemplate.length;
 
-              for (const [sx, sy] of shapeTemplate) {
-                const tr = r + sx; const tc = c + sy;
-                const neighbors = [{ r: tr - 1, c: tc }, { r: tr + 1, c: tc }, { r: tr, c: tc - 1 }, { r: tr, c: tc + 1 }]
-                  .filter(n => n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && forceUsefulFor[n.r][n.c]);
+              if (forceMatch) {
+                let bestMatchedColor: Color | null = null;
+                let fallbackColor: Color | null = null;
 
-                const counts: Record<string, number> = {};
-                neighbors.forEach(n => { const col = forceUsefulFor[n.r][n.c]!.color; counts[col] = (counts[col] || 0) + 1; });
-                const matchCol = Object.keys(counts).find(col => counts[col] + pieceLength >= 3);
-                if (matchCol) { bestMatchedColor = matchCol as Color; break; }
-                if (neighbors.length > 0 && !fallbackColor) fallbackColor = forceUsefulFor[neighbors[0].r][neighbors[0].c]!.color;
-              }
+                for (const tCol of colors) {
+                  let totalClusterSize = pLen;
+                  const v = new Set<string>();
+                  const q: {r:number, c:number}[] = [];
+                  shapeTemplate.forEach(([sx,sy]) => { q.push({r:r+sx, c:c+sy}); v.add(`${r+sx}-${c+sy}`); });
 
-              const finalColor = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
-              shapeTemplate.forEach(([sx, sy]) => {
-                assigned.push({ x: sx, y: sy, color: finalColor });
-              });
-
-              const newPiece = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
-              
-              const finalize = (p: Piece) => {
-                if (boardToUpdate) {
-                  p.shape.forEach(b => {
-                    if (boardToUpdate[r + b.x] && r + b.x < BOARD_SIZE) 
-                      boardToUpdate[r + b.x][c + b.y] = { id: 'reserved', color: 'red' };
-                  });
+                  let foundNeighbor = false;
+                  while (q.length > 0) {
+                    const cur = q.shift()!;
+                    [{r:cur.r-1,c:cur.c},{r:cur.r+1,c:cur.c},{r:cur.r,c:cur.c-1},{r:cur.r,c:cur.c+1}].forEach(nn => {
+                      if (nn.r>=0 && nn.r<BOARD_SIZE && nn.c>=0 && nn.c<BOARD_SIZE && !v.has(`${nn.r}-${nn.c}`)) {
+                        const cell = boardToUpdate[nn.r][nn.c];
+                        if (cell && cell.color === tCol) {
+                          v.add(`${nn.r}-${nn.c}`); q.push(nn);
+                          if (cell.id !== 'reserved') { totalClusterSize++; foundNeighbor = true; }
+                        }
+                      }
+                    });
+                  }
+                  if (totalClusterSize >= 3 && foundNeighbor) { bestMatchedColor = tCol; break; }
+                  if (foundNeighbor && !fallbackColor) fallbackColor = tCol;
                 }
-                return p;
-              };
 
-              if (bestMatchedColor) return finalize(newPiece);
-              if (!firstFoundPiece) firstFoundPiece = newPiece;
+                const finalColor = bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)];
+                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: finalColor }));
+                const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+                if (bestMatchedColor) return finalizeAt(newP, r, c);
+                if (!bestMatchFound) bestMatchFound = { p: newP, r, c };
+              } else {
+                const rndColor = colors[Math.floor(Math.random() * colors.length)];
+                shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: rndColor }));
+                return finalizeAt({ id: Math.random().toString(36).substr(2, 9), shape: assigned }, r, c);
+              }
             }
           }
         }
       }
-      if (firstFoundPiece) return firstFoundPiece;
+      if (bestMatchFound) return finalizeAt(bestMatchFound.p, bestMatchFound.r, bestMatchFound.c);
+      if (firstSpotFound) return finalizeAt(firstSpotFound.p, firstSpotFound.r, firstSpotFound.c);
 
-      let firstSurvival: Piece | null = null;
+      // 2. FALLBACK DE SOBREVIVÊNCIA (NÍVEL 1)
       if (lvl > 1) {
         const basicShapes = [...SHAPES_BY_LEVEL[0]].sort(() => Math.random() - 0.5);
+        let survivalFound: { p: Piece; r: number; c: number } | null = null;
+
         for (const shapeTemplate of basicShapes) {
           for (let r = 0; r < BOARD_SIZE; r++) {
             for (let c = 0; c < BOARD_SIZE; c++) {
               if (shapeTemplate.every(([sx, sy]) => {
                 const tr = r + sx; const tc = c + sy;
-                return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && forceUsefulFor[tr][tc] === null;
+                return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && boardToUpdate[tr][tc] === null;
               })) {
                 const assigned: { x: number; y: number; color: Color }[] = [];
-                let bestColor: Color | null = null;
+                let bColor: Color | null = null;
                 let fbColor: Color | null = null;
                 const pLen = shapeTemplate.length;
 
                 for (const [sx, sy] of shapeTemplate) {
                   const tr = r + sx; const tc = c + sy;
-                  const neighbors = [{r:tr-1,c:tc},{r:tr+1,c:tc},{r:tr,c:tc-1},{r:tr,c:tc+1}].filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&forceUsefulFor[n.r][n.c]);
-                  const counts: Record<string, number> = {};
-                  neighbors.forEach(n => { const col = forceUsefulFor[n.r][n.c]!.color; counts[col] = (counts[col] || 0) + 1; });
-                  const matchCol = Object.keys(counts).find(col => counts[col] + pLen >= 3);
-                  if (matchCol) { bestColor = matchCol as Color; break; }
-                  if (neighbors.length > 0 && !fbColor) fbColor = forceUsefulFor[neighbors[0].r][neighbors[0].c]!.color;
+                  const neighbors = [{r:tr-1,c:tc},{r:tr+1,c:tc},{r:tr,c:tc-1},{r:tr,c:tc+1}].filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
+                  for (const tCol of colors) {
+                    let totalSize = pLen; const v = new Set<string>(); const q: {r:number,c:number}[] = [];
+                    shapeTemplate.forEach(([sx,sy]) => { q.push({r:r+sx,c:c+sy}); v.add(`${r+sx}-${c+sy}`); });
+                    let touch = false;
+                    while (q.length > 0) {
+                      const cur = q.shift()!;
+                      [{r:cur.r-1,c:cur.c},{r:cur.r+1,c:cur.c},{r:cur.r,c:cur.c-1},{r:cur.r,c:cur.c+1}].forEach(nn => {
+                        if (nn.r>=0 && nn.r<BOARD_SIZE && nn.c>=0 && nn.c<BOARD_SIZE && !v.has(`${nn.r}-${nn.c}`)) {
+                          const cell = boardToUpdate[nn.r][nn.c];
+                          if (cell && cell.color === tCol) {
+                            v.add(`${nn.r}-${nn.c}`); q.push(nn);
+                            if (cell.id !== 'reserved') { totalSize++; touch = true; }
+                          }
+                        }
+                      });
+                    }
+                    if (totalSize >= 3 && touch) { bColor = tCol; break; }
+                    if (touch && !fbColor) fbColor = tCol;
+                  }
+                  if (bColor) break;
                 }
-
-                const fColor = bestColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
+                const fColor = bColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
                 shapeTemplate.forEach(([sx, sy]) => assigned.push({ x: sx, y: sy, color: fColor }));
-                const p = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
-                if (bestColor) return p;
-                if (!firstSurvival) firstSurvival = p;
+                const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+                if (bColor) return finalizeAt(newP, r, c);
+                if (!survivalFound) survivalFound = { p: newP, r, c };
               }
             }
           }
         }
+        if (survivalFound) return finalizeAt(survivalFound.p, survivalFound.r, survivalFound.c);
       }
-      if (firstSurvival) return firstSurvival;
+
+      // 3. ABSOLUTE PITY (1x1 INTELIGENTE)
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (boardToUpdate[r][c] === null) {
+            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
+              .filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
+            const tColor = neighbors.length > 0 ? boardToUpdate[neighbors[0].r][neighbors[0].c]!.color : colors[Math.floor(Math.random() * colors.length)];
+            const p = { id: 'pity-fix', shape: [{ x: 0, y: 0, color: tColor }] };
+            return finalizeAt(p, r, c);
+          }
+        }
+      }
     }
 
-    // Fallback para geração aleatória padrão
+    // 4. GERAÇÃO ALEATÓRIA PADRÃO (FALLBACK GERAL)
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
     const assigned: { x: number; y: number; color: Color }[] = [];
-    for (const [x, y] of shapeTemplate) {
-      const neighborColors = new Set(
-        assigned
-          .filter(b => Math.abs(b.x - x) + Math.abs(b.y - y) === 1)
-          .map(b => b.color)
-      );
-      const available = colors.filter(c => !neighborColors.has(c));
-      const pool = available.length > 0 ? available : colors;
-      const color = pool[Math.floor(Math.random() * pool.length)];
-      assigned.push({ x, y, color });
-    }
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      shape: assigned,
-    };
+    const mainColor = colors[Math.floor(Math.random() * colors.length)];
+    shapeTemplate.forEach(([x, y]) => assigned.push({ x, y, color: mainColor }));
+    return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
   }, []);
 
   const startNewGame = useCallback(() => {
@@ -672,21 +707,23 @@ export default function App() {
 
         let finalPieces: Piece[];
         if (remainingPieces.length === 0) {
+          const totalCells = BOARD_SIZE * BOARD_SIZE;
           const occupiedCount = actualBoard.flat().filter(c => c).length;
-          const isCrowded = occupiedCount > (BOARD_SIZE * BOARD_SIZE * 0.6);
+          const occupancy = occupiedCount / totalCells;
           
-          // Geração Sequencial Real: Cada peça subsequente ocupa um espaço físico no board virtual
           const simBoard = actualBoard.map(row => [...row]);
           const pieces: Piece[] = [];
           
-          // Peça 1: Sempre útil. Marca o simBoard.
-          pieces.push(generatePiece(currentLevel, simBoard));
+          // CRIAÇÃO DE CURVA DINÂMICA DE AJUDA (PITY SYSTEM 2.0)
+          // Nível 1: Match Garantido (Sempre para a primeira peça se > 50% ou forçado)
+          const p1Match = occupancy > 0.5;
+          const p2Match = occupancy > 0.65;
+          const p3Match = occupancy > 0.8;
+          const simplify = occupancy > 0.85; // Se estiver quase morrendo, dê peças pequenas
 
-          // Peça 2: Útil se estiver lotado (Crowded), em um ESPAÇO DIFERENTE da Peça 1.
-          pieces.push(generatePiece(currentLevel, isCrowded ? simBoard : null));
-
-          // Peça 3: Aleatória (pode ser útil se sobrar espaço no simBoard)
-          pieces.push(generatePiece(currentLevel, null));
+          pieces.push(generatePiece(currentLevel, simBoard, p1Match, simplify));
+          pieces.push(generatePiece(currentLevel, simBoard, p2Match, simplify));
+          pieces.push(generatePiece(currentLevel, simBoard, p3Match, simplify));
 
           finalPieces = pieces.sort(() => Math.random() - 0.5);
         } else {
