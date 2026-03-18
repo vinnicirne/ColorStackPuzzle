@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX, Share2 } from 'lucide-react';
 import { Color, BoardCell, Piece } from './types';
-import { AdMob, InterstitialAdPluginEvents, BannerAdPosition, RewardAdPluginEvents } from '@capacitor-community/admob';
+import { AdMob, InterstitialAdPluginEvents, BannerAdPosition, RewardAdPluginEvents, BannerAdSize } from '@capacitor-community/admob';
 import { Device } from '@capacitor/device';
 import { Share } from '@capacitor/share';
 import { supabase } from './lib/supabase';
@@ -124,9 +124,40 @@ function soundGameOver(ctx: AudioContext) {
     setTimeout(() => playTone(ctx, f, 0.3, 'sawtooth', 0.12), i * 120);
   });
 }
-function soundSpecial(ctx: AudioContext) {
-  [523, 659, 783, 1046].forEach((f, i) => {
-    setTimeout(() => playTone(ctx, f, 0.12, 'triangle', 0.2), i * 50);
+function soundGreat(ctx: AudioContext) {
+  // EXTOURO (Noise)
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+  for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
+  const s = ctx.createBufferSource(); s.buffer = b;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.1, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+  s.connect(g); g.connect(ctx.destination); s.start();
+
+  playTone(ctx, 110, 0.12, 'sawtooth', 0.2); 
+  [523, 659, 783].forEach((f, i) => {
+    setTimeout(() => playTone(ctx, f, 0.15, 'square', 0.15), i * 50);
+  });
+}
+function soundAmazing(ctx: AudioContext) {
+  // Camada 1: O "Estalo" (Noise High-Pass)
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+  for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
+  const s = ctx.createBufferSource(); s.buffer = b;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.3, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+  s.connect(g); g.connect(ctx.destination); s.start();
+
+  // Camada 2: O "Rurro" (Bass Sweep)
+  const os = ctx.createOscillator(); const gn = ctx.createGain();
+  os.type = 'sawtooth'; os.frequency.setValueAtTime(160, ctx.currentTime);
+  os.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.4);
+  gn.gain.setValueAtTime(0.2, ctx.currentTime);
+  gn.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+  os.connect(gn); gn.connect(ctx.destination); os.start(); os.stop(ctx.currentTime + 0.4);
+
+  // Camada 3: Melodia Atômica
+  [523, 659, 783, 1046, 1318].forEach((f, i) => {
+    setTimeout(() => playTone(ctx, f, 0.2, 'square', 0.18), i * 40);
   });
 }
 
@@ -387,9 +418,14 @@ export default function App() {
     setCurrentPieces([generatePiece(1, null, false), generatePiece(1, null, false), generatePiece(1, null, false)]);
     setGameState('playing');
     setIsClearing(false);
-    setSelectedPiece(null);
     setClearingCells(new Set());
     setParticles([]);
+    
+    // Pre-load Intersticial para a próxima troca de fase (Evita LAG)
+    const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+    if (isNative) {
+      AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
+    }
   }, [generatePiece]);
 
   useEffect(() => {
@@ -456,13 +492,19 @@ export default function App() {
             adId: AD_UNITS.BANNER,
             position: BannerAdPosition.BOTTOM_CENTER,
             margin: 0,
-            isTesting: false
+            isTesting: false,
+            adSize: BannerAdSize.ADAPTIVE_BANNER
           });
 
-          // Prepara anúncio de abertura
-          // Nota: O plugin atual pode não ter suporte direto nativo para App Open via JS dependendo da versão,
-          // mas preparamos o Interstitial como fallback ou exploramos se o ID funciona como Interstitial.
-          // Para Color Stack, o App Open geralmente é tratado no carregamento nativo.
+          // PRE-LOAD & OPENING AD: Usa Intersticial como fallback (v8 plugin JS não tem App Open)
+          try {
+            await AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false });
+            await AdMob.showInterstitial();
+            // Recarrega em background para a primeira troca de fase (Evita LAG)
+            AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
+          } catch (e) {
+            console.log('Opening ad skip/fail:', e);
+          }
         } catch (err) {
           console.log('AdMob Startup Fail:', err);
         }
@@ -635,15 +677,16 @@ export default function App() {
     const cx = boardLeft + center.c * cellSize + cellSize / 2;
     const cy = boardTop + center.r * cellSize + cellSize / 2;
 
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
+    const pCount = group.length >= 5 ? 16 : 8;
+    for (let i = 0; i < pCount; i++) {
+      const angle = (i / pCount) * Math.PI * 2;
       newParticles.push({
         id: Math.random().toString(36).substr(2, 9),
         x: cx,
         y: cy,
         color,
-        dx: Math.cos(angle) * (30 + Math.random() * 40),
-        dy: Math.sin(angle) * (30 + Math.random() * 40),
+        dx: Math.cos(angle) * (30 + Math.random() * 50),
+        dy: Math.sin(angle) * (30 + Math.random() * 50),
       });
     }
     setParticles(prev => [...prev, ...newParticles]);
@@ -713,22 +756,25 @@ export default function App() {
         setClearingCells(toFlash);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
         setIsShaking(true);
-        setTimeout(() => setIsShaking(false), 300);
-        if (ctx) soundClear(ctx);
+        const shakeDuration = (combo > 1 || matchGroups.flat().length >= 5) ? 550 : 300;
+        setTimeout(() => setIsShaking(false), shakeDuration);
+        const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
+        let playStandardSound = true;
 
         if (combo > 1) {
           setComboText(`COMBO X${combo}! 🔥`);
-          if (ctx) soundSpecial(ctx);
+          if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+        } else if (totalMatched >= 5) { // AMAZING: 5 ou mais blocos
+          setComboText('AMAZING! 🔥');
+          if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+        } else if (totalMatched >= 4) { // GREAT: 4 blocos
+          setComboText('GREAT! ⭐');
+          if (ctx) { soundGreat(ctx); playStandardSound = false; }
         } else {
-          const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-          if (totalMatched > 5) {
-            setComboText('AMAZING! 🔥');
-            if (ctx) soundSpecial(ctx);
-          } else if (totalMatched > 3) {
-            setComboText('GREAT! ⭐');
-            if (ctx) soundSpecial(ctx);
-          } else setComboText('CLEAR!');
+          setComboText('CLEAR!');
         }
+
+        if (playStandardSound && ctx) soundClear(ctx);
         
         setTimeout(() => setComboText(null), 1000);
 
@@ -806,13 +852,14 @@ export default function App() {
           setLevel(currentLevel);
           setGameState('levelup');
           
-          // Troca de fase: Mostra Intersticial
+          // Troca de fase: Mostra Intersticial já pré-carregado (Sem LAG)
           const showPhaseAd = async () => {
             const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
             if (isNative) {
               try {
-                await AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false });
                 await AdMob.showInterstitial();
+                // Prepara o PRÓXIMO anúncio em background
+                AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
               } catch (e) { console.error('Phase Ad fail', e); }
             }
           };
@@ -1169,6 +1216,7 @@ export default function App() {
             scale: isClearing ? [1, 1.01, 1] : 1,
             x: isShaking ? [0, -3, 3, -3, 3, 0] : 0,
             y: isShaking ? [0, 2, -2, 2, -2, 0] : 0,
+            filter: isShaking ? 'brightness(1.5) contrast(1.2)' : 'brightness(1) contrast(1)',
           }}
           transition={{ 
             scale: { duration: 0.3 },
@@ -1284,15 +1332,16 @@ export default function App() {
         </motion.div>
 
         {/* Combo Feedback */}
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {comboText && (
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.5 }}
-              animate={{ opacity: 1, y: -40, scale: 1.5 }}
-              exit={{ opacity: 0, scale: 2 }}
-              className="absolute inset-x-0 top-1/2 text-center pointer-events-none z-20"
+              initial={{ opacity: 0, y: 60, scale: 0.2, rotate: -10 }}
+              animate={{ opacity: 1, y: -120, scale: [0.2, 2.5, 2], rotate: 0 }}
+              exit={{ opacity: 0, scale: 4, filter: 'blur(20px)' }}
+              transition={{ type: 'spring', damping: 10, stiffness: 100 }}
+              className="absolute inset-x-0 top-1/2 text-center pointer-events-none z-50 drop-shadow-[0_0_60px_white]"
             >
-              <span className="text-3xl font-display font-black text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.5)] italic">
+              <span className="text-6xl sm:text-8xl font-display font-black text-white italic tracking-tighter uppercase block drop-shadow-2xl">
                 {comboText}
               </span>
             </motion.div>
