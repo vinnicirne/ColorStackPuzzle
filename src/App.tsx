@@ -58,9 +58,11 @@ const COLOR_MAP: Record<Color, string> = {
   red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(244,63,94,0.5)]',
   blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(14,165,233,0.5)]',
   green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(16,185,129,0.5)]',
-  yellow: 'bg-gradient-to-br from-yellow-200 to-amber-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(251,191,36,0.5)]',
+  yellow: 'bg-gradient-to-br from-yellow-100 to-yellow-400 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(253,224,71,0.5)]',
   purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(139,92,246,0.5)]',
-  orange: 'bg-gradient-to-br from-orange-300 to-orange-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(249,115,22,0.5)]',
+  orange: 'bg-gradient-to-br from-orange-500 to-red-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(234,88,12,0.5)]',
+  pink: 'bg-gradient-to-br from-pink-400 to-rose-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(236,72,153,0.5)]',
+  cyan: 'bg-gradient-to-br from-cyan-300 to-sky-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(6,182,212,0.5)]',
   rainbow: 'joker-rainbow block-shadow',
 };
 
@@ -219,6 +221,8 @@ export default function App() {
 
   // ── Cores disponíveis por nível ──
   const getAvailableColors = (lvl: number): Color[] => {
+    if (lvl >= 9) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'];
+    if (lvl >= 7) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink'];
     if (lvl >= 5) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
     if (lvl >= 3) return ['red', 'blue', 'green', 'yellow', 'purple'];
     return ['red', 'blue', 'green', 'yellow'];
@@ -467,13 +471,19 @@ export default function App() {
         const id = await Device.getId();
         const { data, error } = await supabase
           .from('player_stats')
-          .select('high_score')
+          .select('high_score, max_level')
           .eq('device_id', id.identifier)
           .single();
         
-        if (data && data.high_score > (parseInt(savedHighScore) || 0)) {
-          setHighScore(data.high_score);
-          localStorage.setItem('colorStackHighScore', data.high_score.toString());
+        if (data) {
+          if (data.high_score > (parseInt(savedHighScore) || 0)) {
+            setHighScore(data.high_score);
+            localStorage.setItem('colorStackHighScore', data.high_score.toString());
+          }
+          if (data.max_level > (parseInt(savedLevel) || 1)) {
+             setLevel(data.max_level);
+             localStorage.setItem('colorStackLevel', data.max_level.toString());
+          }
         }
       } catch (err) {
         console.log('Cloud sync fail:', err);
@@ -630,7 +640,6 @@ export default function App() {
               starRange.forEach(cell => { 
                 if (!group.some(ex => ex.r===cell.r && ex.c===cell.c)) {
                   group.push(cell);
-                  visited[cell.r][cell.c] = true; // Marca como visitado para evitar re-processamento do mesmo grupo
                 }
               });
             }
@@ -668,40 +677,53 @@ export default function App() {
 
   // Emitir partículas ao explodir um grupo
   const spawnParticles = useCallback((group: { r: number; c: number }[], color: string) => {
-    const cellSize = Math.min(window.innerWidth * 0.9, 400) / BOARD_SIZE;
-    const boardLeft = (window.innerWidth - Math.min(window.innerWidth * 0.9, 400)) / 2;
-    const boardTop = 140; // estimativa
+    const el = document.getElementById('game-board');
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cellSize = rect.width / BOARD_SIZE;
 
     const newParticles: Particle[] = [];
-    const center = group[Math.floor(group.length / 2)];
-    const cx = boardLeft + center.c * cellSize + cellSize / 2;
-    const cy = boardTop + center.r * cellSize + cellSize / 2;
+    const density = group.length >= 6 ? 6 : 4; 
 
-    const pCount = group.length >= 5 ? 16 : 8;
-    for (let i = 0; i < pCount; i++) {
-      const angle = (i / pCount) * Math.PI * 2;
-      newParticles.push({
-        id: Math.random().toString(36).substr(2, 9),
-        x: cx,
-        y: cy,
-        color,
-        dx: Math.cos(angle) * (30 + Math.random() * 50),
-        dy: Math.sin(angle) * (30 + Math.random() * 50),
-      });
-    }
+    group.forEach(({ r, c }) => {
+      const cx = rect.left + c * cellSize + cellSize / 2;
+      const cy = rect.top + r * cellSize + cellSize / 2;
+      
+      for (let i = 0; i < density; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 25 + Math.random() * 45;
+        // Efeito "Cores Diferentes" para o Coringa
+        const particleColor = color === '#ffffff' 
+          ? `hsl(${Math.random() * 360}, 100%, 70%)` 
+          : color;
+
+        newParticles.push({
+          id: Math.random().toString(36).substr(2, 9),
+          x: cx,
+          y: cy,
+          color: particleColor,
+          dx: Math.cos(angle) * speed,
+          dy: Math.sin(angle) * speed,
+        });
+      }
+    });
+
     setParticles(prev => [...prev, ...newParticles]);
+    const idsToRemove = new Set(newParticles.map(np => np.id));
     setTimeout(() => {
-      setParticles(prev => prev.filter(p => !newParticles.find(np => np.id === p.id)));
-    }, 600);
+      setParticles(prev => prev.filter(p => !idsToRemove.has(p.id)));
+    }, 800);
   }, []);
 
   const PARTICLE_COLOR_MAP: Record<Color, string> = {
     red: '#fb7185',
     blue: '#38bdf8',
     green: '#4ade80',
-    yellow: '#fbbf24',
+    yellow: '#fde047',
     purple: '#c084fc',
-    orange: '#fb923c',
+    orange: '#ea580c',
+    pink: '#ec4899',
+    cyan: '#06b6d4',
     rainbow: '#ffffff',
   };
 
@@ -800,8 +822,9 @@ export default function App() {
           setBoard(() => [...finalBoard]);
           setScore(nextScore);
 
+          const idsToClean = new Set(newFloatingPoints.map(np => np.id));
           setTimeout(() => {
-            setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.find(np => np.id === p.id)));
+            setFloatingPoints(prev => prev.filter(p => !idsToClean.has(p.id)));
           }, 800);
 
           // Recursão para cascatas
@@ -897,18 +920,17 @@ export default function App() {
 
     if (isNative) {
       try {
-        await AdMob.prepareInterstitial({ 
-          adId: AD_UNITS.INTERSTITIAL,
-          isTesting: false
-        });
+        // Usa o Intersticial já pré-carregado em background (Sem LAG)
         await AdMob.showInterstitial();
         
         const listener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
           listener.remove();
           startNewGame();
+          // Prepara o próximo em background
+          AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
         });
       } catch (err) {
-        console.error('Production Interstitial failed:', err);
+        console.error('Restart Ad fail:', err);
         startNewGame();
       }
     } else {
@@ -1030,19 +1052,32 @@ export default function App() {
             <div className="flex flex-col gap-4 w-full max-w-xs">
               <button
                 onClick={() => {
-                  // Se houver progresso, apenas entra no jogo. Caso contrário, começa do zero.
-                  if (currentPieces.length > 0 && (score > 0 || board.some(row => row.some(cell => cell !== null)))) {
+                  const hasProgress = currentPieces.length > 0 && (score > 0 || board.some(row => row.some(cell => cell !== null)));
+                  if (hasProgress) {
                     setGameState('playing');
                   } else {
                     startNewGame();
                   }
                 }}
-                className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-400 hover:to-purple-500 text-white py-5 rounded-3xl font-display font-bold text-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(232,121,249,0.4)] flex items-center justify-center gap-3 relative overflow-hidden group"
+                className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-400 hover:to-purple-500 text-white py-5 rounded-3xl font-display font-bold text-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(232,121,249,0.4)] flex items-center justify-center gap-3 relative overflow-hidden group uppercase"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                 <Play className="w-6 h-6 fill-current" />
-                JOGAR
+                { (currentPieces.length > 0 && score > 0) ? 'CONTINUAR' : 'NOVA PARTIDA' }
               </button>
+
+              { (currentPieces.length > 0 && score > 0) && (
+                <button
+                  onClick={() => {
+                    if (confirm('Deseja iniciar uma nova partida? Seu progresso atual nesta fase será perdido.')) {
+                      startNewGame();
+                    }
+                  }}
+                  className="text-zinc-500 hover:text-zinc-400 py-1 text-[10px] font-bold tracking-widest uppercase transition-colors"
+                >
+                  Reiniciar nível atual
+                </button>
+              )}
               <button
                 onClick={() => setShowStats(true)}
                 className="bg-white/5 hover:bg-white/10 backdrop-blur-md text-white py-4 rounded-3xl font-bold transition-all active:scale-95 border border-white/10 flex items-center justify-center gap-3"
@@ -1151,24 +1186,33 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ─── HEADER ─── */}
-      <div className="w-full max-w-md flex justify-between items-end mb-6">
-        <div className="flex flex-col">
-          <h1 className="text-4xl font-display font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 via-violet-400 to-sky-400 tracking-tighter leading-none mb-1">
-            Color Stack
-          </h1>
-          <div className="flex items-center gap-2 text-zinc-400 text-xs font-semibold px-1">
-            <Trophy className="w-3.5 h-3.5 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
-            <span className="opacity-80">BEST: {highScore}</span>
+      {/* ─── HEADER: STATUS CARDS ─── */}
+      <div className="w-full max-w-md flex justify-between items-start mb-6 px-1 pt-4">
+        {/* Card de FASE (Lado Esquerdo) */}
+        <div className="relative group">
+          <div className={`absolute -inset-1 bg-gradient-to-r from-fuchsia-600 to-purple-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000`}></div>
+          <div className="relative glass px-5 py-2 rounded-2xl flex flex-col items-start border border-white/10 shadow-2xl min-w-[130px]">
+            <span className={`text-[10px] uppercase tracking-[0.2em] font-black mb-0.5 ${levelColor}`}>FASE ATUAL</span>
+            <div className="flex items-baseline gap-2">
+              <motion.span 
+                key={level}
+                initial={{ scale: 1.2 }}
+                animate={{ scale: 1 }}
+                className="text-3xl font-display font-black text-white leading-none"
+              >
+                {level}
+              </motion.span>
+              <div className="text-[10px] text-zinc-500 font-bold uppercase">MAX: {stats.maxLevel}</div>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-3">
-          <div className="relative group">
-            {/* Glow effect behind score */}
-            <div className="absolute -inset-1 bg-gradient-to-r from-sky-600 to-violet-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
-            <div className="relative glass px-6 py-2 rounded-2xl flex flex-col items-center border border-white/10 shadow-2xl">
-              <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/80 font-black mb-0.5">SCORE</span>
+        {/* Card de SCORE (Lado Direito) */}
+        <div className="relative group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-sky-600 to-violet-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
+          <div className="relative glass px-6 py-2 rounded-2xl flex flex-col items-end border border-white/10 shadow-2xl min-w-[130px]">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/80 font-black mb-0.5 text-right w-full">PONTUAÇÃO</span>
+            <div className="flex flex-col items-end">
               <motion.span 
                 key={score}
                 initial={{ scale: 1.2, color: '#38bdf8' }}
@@ -1177,6 +1221,7 @@ export default function App() {
               >
                 {score}
               </motion.span>
+              <div className="text-[10px] text-zinc-500 font-bold uppercase">BEST: {highScore}</div>
             </div>
           </div>
         </div>

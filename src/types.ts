@@ -1,4 +1,4 @@
-export type Color = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'orange' | 'rainbow';
+export type Color = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'orange' | 'rainbow' | 'pink' | 'cyan';
 
 export interface Block {
   id: string;
