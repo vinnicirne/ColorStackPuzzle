@@ -95,30 +95,35 @@ function createAudioCtx(): AudioContext | null {
   }
 }
 
-function playTone(ctx: AudioContext, freq: number, duration: number, type: OscillatorType = 'sine', vol = 0.15) {
+function playTone(ctx: AudioContext, freq: number, duration: number, type: OscillatorType = 'sine', vol = 0.15, delay = 0) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
+  const startTime = ctx.currentTime + delay;
+  
   osc.connect(gain);
   gain.connect(ctx.destination);
-  osc.frequency.value = freq;
+  osc.frequency.setValueAtTime(freq, startTime);
   osc.type = type;
-  gain.gain.setValueAtTime(vol, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-  osc.start(ctx.currentTime);
-  osc.stop(ctx.currentTime + duration);
+  
+  gain.gain.setValueAtTime(0.0001, startTime); 
+  gain.gain.exponentialRampToValueAtTime(vol, startTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  
+  osc.start(startTime);
+  osc.stop(startTime + duration);
 }
 
 function soundPlace(ctx: AudioContext) {
   playTone(ctx, 300, 0.08, 'sine', 0.1);
 }
 function soundClear(ctx: AudioContext) {
-  playTone(ctx, 440, 0.15, 'triangle', 0.18);
-  setTimeout(() => playTone(ctx, 660, 0.15, 'triangle', 0.15), 80);
-  setTimeout(() => playTone(ctx, 880, 0.2, 'triangle', 0.12), 160);
+  playTone(ctx, 440, 0.15, 'triangle', 0.15);
+  playTone(ctx, 660, 0.15, 'triangle', 0.12, 0.08); // note, duration, type, vol, delay
+  playTone(ctx, 880, 0.2, 'triangle', 0.1, 0.16);
 }
 function soundLevelUp(ctx: AudioContext) {
   [261, 329, 392, 523].forEach((f, i) => {
-    setTimeout(() => playTone(ctx, f, 0.25, 'sine', 0.18), i * 100);
+    playTone(ctx, f, 0.3, 'sine', 0.12, i * 0.1);
   });
 }
 function soundGameOver(ctx: AudioContext) {
@@ -132,12 +137,12 @@ function soundGreat(ctx: AudioContext) {
   for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
   const s = ctx.createBufferSource(); s.buffer = b;
   const g = ctx.createGain(); g.gain.setValueAtTime(0.1, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-  s.connect(g); g.connect(ctx.destination); s.start();
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+  s.connect(g); g.connect(ctx.destination); s.start(); s.stop(ctx.currentTime + 0.12);
 
-  playTone(ctx, 110, 0.12, 'sawtooth', 0.2); 
+  playTone(ctx, 110, 0.12, 'sawtooth', 0.15); 
   [523, 659, 783].forEach((f, i) => {
-    setTimeout(() => playTone(ctx, f, 0.15, 'square', 0.15), i * 50);
+    playTone(ctx, f, 0.15, 'square', 0.1, i * 0.05);
   });
 }
 function soundAmazing(ctx: AudioContext) {
@@ -146,21 +151,31 @@ function soundAmazing(ctx: AudioContext) {
   for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
   const s = ctx.createBufferSource(); s.buffer = b;
   const g = ctx.createGain(); g.gain.setValueAtTime(0.3, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-  s.connect(g); g.connect(ctx.destination); s.start();
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+  s.connect(g); g.connect(ctx.destination); s.start(); s.stop(ctx.currentTime + 0.15);
 
   // Camada 2: O "Rurro" (Bass Sweep)
   const os = ctx.createOscillator(); const gn = ctx.createGain();
-  os.type = 'sawtooth'; os.frequency.setValueAtTime(160, ctx.currentTime);
-  os.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.4);
-  gn.gain.setValueAtTime(0.2, ctx.currentTime);
+  os.type = 'sawtooth'; os.frequency.setValueAtTime(140, ctx.currentTime);
+  os.frequency.exponentialRampToValueAtTime(30, ctx.currentTime + 0.4);
+  gn.gain.setValueAtTime(0.15, ctx.currentTime);
   gn.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
   os.connect(gn); gn.connect(ctx.destination); os.start(); os.stop(ctx.currentTime + 0.4);
 
   // Camada 3: Melodia Atômica
   [523, 659, 783, 1046, 1318].forEach((f, i) => {
-    setTimeout(() => playTone(ctx, f, 0.2, 'square', 0.18), i * 40);
+    playTone(ctx, f, 0.2, 'square', 0.12, i * 0.04);
   });
+}
+
+function speak(text: string) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.pitch = 1.1;
+  utterance.rate = 1.15;
+  window.speechSynthesis.speak(utterance);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -786,12 +801,15 @@ export default function App() {
         if (combo > 1) {
           setComboText(`COMBO X${combo}! 🔥`);
           if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+          speak(`Combo ${combo}`);
         } else if (totalMatched >= 5) { // AMAZING: 5 ou mais blocos
           setComboText('AMAZING! 🔥');
           if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+          speak('Amazing');
         } else if (totalMatched >= 4) { // GREAT: 4 blocos
           setComboText('GREAT! ⭐');
           if (ctx) { soundGreat(ctx); playStandardSound = false; }
+          speak('Great');
         } else {
           setComboText('CLEAR!');
         }
@@ -1138,7 +1156,7 @@ export default function App() {
               <h2 className={`text-6xl font-display font-black mb-2 ${levelColor}`}>FASE {level}!</h2>
               <p className="text-zinc-400 text-lg mb-2">Novas peças desbloqueadas!</p>
               <p className="text-zinc-500 text-sm mb-8">
-                {level >= 5 ? '6 cores ativas 🟠' : level >= 3 ? '5 cores ativas 🟣' : '4 cores ativas'}
+                {level >= 9 ? '8 cores ativas! 💎' : level >= 7 ? '7 cores ativas 🌸' : level >= 5 ? '6 cores ativas 🟠' : level >= 3 ? '5 cores ativas 🟣' : '4 cores ativas'}
               </p>
               <button
                 onClick={() => {
@@ -1232,7 +1250,7 @@ export default function App() {
         <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2 px-1">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${levelColor} shadow-[0_0_8px_currentColor]`}></div>
-            <span className={levelColor}>STAGE {level}</span>
+            <span className={levelColor}>FASE {level}</span>
           </div>
           <span className="text-sky-400/80">{Math.round(levelProgress * 100)}% TO NEXT</span>
         </div>
@@ -1404,7 +1422,7 @@ export default function App() {
             >
               <h2 className="text-4xl font-display font-bold text-white mb-1">Game Over</h2>
               <p className="text-zinc-400 mb-1">Score: {score} pts</p>
-              <p className="text-zinc-500 text-sm mb-6">Fase {level} concluída</p>
+              <p className="text-fuchsia-500 font-bold text-sm mb-6">FASE {level} CONCLUÍDA</p>
               <div className="flex flex-col gap-3 w-full max-w-[200px]">
                 <button
                   onClick={showAdAndRestart}
