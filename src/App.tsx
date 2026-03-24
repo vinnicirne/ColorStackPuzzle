@@ -736,8 +736,15 @@ export default function App() {
       const initAdMob = async () => {
         try {
           // Inicializa AdMob para PRODUÇÃO
-          await AdMob.initialize({ initializeForTesting: false });
+          await AdMob.initialize({ 
+            initializeForTesting: false,
+          });
           
+          // Debug: Verifica se o Tracking Authorization está disponível (iOS)
+          try {
+            await AdMob.trackingAuthorizationStatus();
+          } catch {}
+
           // Mostra o Banner de Produção no rodapé
           // Delay maior para garantir que a UI nativa carregou totalmente em Androids lentos
           setTimeout(async () => {
@@ -751,9 +758,9 @@ export default function App() {
                 npa: false,
               });
             } catch (bannerErr) {
-              console.log('Banner fail:', bannerErr);
+              console.log('AdMob: Banner failed - code: ', JSON.stringify(bannerErr));
             }
-          }, 2500);
+          }, 4500);
 
           // PRE-LOAD & OPENING AD: Usa Intersticial como fallback (v8 plugin JS não tem App Open)
           try {
@@ -762,10 +769,10 @@ export default function App() {
             // Recarrega em background para a primeira troca de fase (Evita LAG)
             AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
           } catch (e) {
-            console.log('Opening ad skip/fail:', e);
+            console.log('AdMob: Opening ad skip/fail - No fill code:', JSON.stringify(e));
           }
         } catch (err) {
-          console.log('AdMob Startup Fail:', err);
+          console.error('AdMob: Startup Global Fail:', err);
         }
       };
       initAdMob();
@@ -1239,15 +1246,19 @@ export default function App() {
 
     if (isNative) {
       try {
-        await AdMob.prepareRewardVideoAd({ adId: AD_UNITS.REWARDED, isTesting: false });
-        await AdMob.showRewardVideoAd();
-        
-        const listener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
-          listener.remove();
+        const rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
+          rewardListener.remove();
           performRevive();
         });
+        const dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
+          dismissListener.remove();
+          rewardListener.remove();
+        });
+
+        await AdMob.prepareRewardVideoAd({ adId: AD_UNITS.REWARDED, isTesting: false });
+        await AdMob.showRewardVideoAd();
       } catch (err) {
-        console.error('Revive fail:', err);
+        console.error('AdMob: Revive ad failed/no-fill:', JSON.stringify(err));
         const audioCtx = await getAudio();
         if (audioCtx) soundError(audioCtx);
       }
