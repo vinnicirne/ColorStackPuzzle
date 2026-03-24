@@ -16,7 +16,7 @@ import PixiBoard from './components/PixiBoard';
 // ─── CONFIGURAÇÕES TÉCNICAS E BALANCEAMENTO ───
 const GAME_CONFIG = {
   BOARD_SIZE: 8,
-  LEVEL_SCORE_INTERVAL: 300,
+  LEVEL_SCORE_INTERVAL: 480,       // Intervalo para subir de fase (Mais desafiador)
   JOKER_CHANCE: 0.08,
   RAINBOW_CHANCE: 0.06,
   GRAVITY_DELAY: 350,
@@ -32,9 +32,9 @@ const GAME_CONFIG = {
   LEVEL_UP_SURVIVAL_RATE: 0.6,
   SCORES: {
     MATCH_3: 10,
-    MATCH_4: 20,
-    MATCH_5_PLUS: 40,
-    COMBO_MULTIPLIER: 1.5,
+    MATCH_4: 19,                   // Granularidade fina
+    MATCH_5_PLUS: 32,             // Balanceado
+    COMBO_MULTIPLIER: 1.42,        // Curva de pontuação suavizada
     MAX_PARTICLES_PER_CELL: 5,
     MAX_GLOBAL_PARTICLES: 100,
   }
@@ -112,7 +112,8 @@ type GameState = 'menu' | 'playing' | 'ad' | 'gameover' | 'levelup';
 
 
 
-// ─── Áudio Sintético via Web Audio API ───────────────────────
+// ─── ÁUDIO MELHORADO - MAIS IMPACTANTE E EMOCIONAL ───────────────────────
+
 function createAudioCtx(): AudioContext | null {
   try {
     return new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -125,95 +126,134 @@ function playTone(ctx: AudioContext, freq: number, duration: number, type: Oscil
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   const startTime = ctx.currentTime + delay;
-  
+
   osc.connect(gain);
   gain.connect(ctx.destination);
   osc.frequency.setValueAtTime(freq, startTime);
   osc.type = type;
-  
-  gain.gain.setValueAtTime(0.0001, startTime); 
-  gain.gain.exponentialRampToValueAtTime(vol, startTime + 0.01);
+
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(vol, startTime + 0.008);
   gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-  
+
   osc.start(startTime);
   osc.stop(startTime + duration);
 }
 
+// Sons básicos melhorados
 function soundPlace(ctx: AudioContext) {
-  const baseFreq = 280 + Math.random() * 60;       // 280–340 Hz
-  const vol = 0.08 + Math.random() * 0.07;         // 0.08–0.15
-  playTone(ctx, baseFreq, 0.06 + Math.random() * 0.05, 'sine', vol);
-  // Adiciona um "click" sutil de ataque
-  playTone(ctx, baseFreq * 2.5, 0.02, 'square', 0.04, 0.005);
+  const base = 320 + Math.random() * 40;
+  playTone(ctx, base, 0.08, 'sine', 0.12);
+  playTone(ctx, base * 2.8, 0.025, 'square', 0.06, 0.01);
 }
+
+// CLEAR - mais "pop" e satisfatório
 function soundClear(ctx: AudioContext) {
-  const root = 400 + Math.random() * 80;
-  playTone(ctx, root, 0.12, 'triangle', 0.12);
-  playTone(ctx, root * 1.5, 0.10, 'triangle', 0.10, 0.04);
-  playTone(ctx, root * 2, 0.14, 'triangle', 0.08, 0.10);
+  const root = 520 + Math.random() * 60;
+  playTone(ctx, root, 0.18, 'triangle', 0.22);
+  playTone(ctx, root * 1.6, 0.14, 'triangle', 0.18, 0.06);
+  playTone(ctx, root * 2.4, 0.22, 'sine', 0.10, 0.12);
 }
-function soundLevelUp(ctx: AudioContext) {
-  [261, 329, 392, 523].forEach((f, i) => {
-    playTone(ctx, f, 0.3, 'sine', 0.12, i * 0.1);
-  });
-}
-function soundGameOver(ctx: AudioContext) {
-  [440, 370, 311, 220].forEach((f, i) => {
-    setTimeout(() => playTone(ctx, f, 0.3, 'sawtooth', 0.12), i * 120);
-  });
-}
+
+// GREAT - som de "vitória leve"
 function soundGreat(ctx: AudioContext) {
-  // Noise burst filtrado para o "estalo" inicial
-  const b = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
-  for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
-  const s = ctx.createBufferSource(); s.buffer = b;
-  const g = ctx.createGain(); g.gain.setValueAtTime(0.25, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1000;
-  s.connect(f).connect(g).connect(ctx.destination);
-  s.start();
+  const root = 680;
+  playTone(ctx, root, 0.25, 'sine', 0.25);
+  playTone(ctx, root * 1.45, 0.20, 'sine', 0.18, 0.08);
+  playTone(ctx, root * 2.1, 0.35, 'triangle', 0.12, 0.18);
 
-  playTone(ctx, 110, 0.12, 'sawtooth', 0.15); 
-  [523, 659, 783].forEach((f, i) => {
-    playTone(ctx, f, 0.15, 'square', 0.1, i * 0.05);
-  });
+  // Noise leve para brilho
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
+  for (let j = 0; j < noise.length; j++) noise.getChannelData(0)[j] = Math.random() * 1.6 - 0.8;
+  const nSrc = ctx.createBufferSource(); nSrc.buffer = noise;
+  const nGain = ctx.createGain(); nGain.gain.value = 0.18;
+  nGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+  nSrc.connect(nGain).connect(ctx.destination);
+  nSrc.start();
 }
+
+// AMAZING / COMBO - som épico e emocionante
 function soundAmazing(ctx: AudioContext) {
-  // Noise burst mais longo e filtrado (High-pass agressivo)
-  const noise = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
-  for (let i = 0; i < noise.length; i++) noise.getChannelData(0)[i] = Math.random() * 2 - 1;
-  const noiseSrc = ctx.createBufferSource(); noiseSrc.buffer = noise;
-  const noiseGain = ctx.createGain(); noiseGain.gain.setValueAtTime(0.4, ctx.currentTime);
-  noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-  const filter = ctx.createBiquadFilter(); filter.type = 'highpass'; filter.frequency.value = 1200;
-  noiseSrc.connect(filter).connect(noiseGain).connect(ctx.destination);
-  noiseSrc.start();
+  const now = ctx.currentTime;
 
-  // Bass sweep mais agressivo (Sawtooth impact)
-  const bass = ctx.createOscillator(); bass.type = 'sawtooth';
-  bass.frequency.setValueAtTime(180, ctx.currentTime);
-  bass.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.45);
-  const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.2, ctx.currentTime);
-  bassGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-  bass.connect(bassGain).connect(ctx.destination); bass.start(); bass.stop(ctx.currentTime + 0.45);
+  // Bass impactante
+  const bass = ctx.createOscillator();
+  bass.type = 'sawtooth';
+  bass.frequency.setValueAtTime(160, now);
+  bass.frequency.exponentialRampToValueAtTime(45, now + 0.55);
 
-  // Melodia triunfal com delay sutil e frequências mais altas
-  [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => {
-    playTone(ctx, f, 0.18, 'square', 0.10, i * 0.06 + 0.05);
+  const bassGain = ctx.createGain();
+  bassGain.gain.setValueAtTime(0.35, now);
+  bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+
+  bass.connect(bassGain).connect(ctx.destination);
+  bass.start(now);
+  bass.stop(now + 0.55);
+
+  // Camada principal (melodia triunfal)
+  [620, 780, 920, 1240, 1480].forEach((f, i) => {
+    playTone(ctx, f, 0.28, 'sine', 0.22, i * 0.07 + 0.08);
+  });
+
+  // Sparkle / brilho alto
+  playTone(ctx, 1850, 0.35, 'square', 0.09, 0.25);
+  playTone(ctx, 2100, 0.22, 'sine', 0.11, 0.32);
+
+  // Noise burst para sensação de explosão
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 0.22, ctx.sampleRate);
+  for (let j = 0; j < noise.length; j++) noise.getChannelData(0)[j] = Math.random() * 2.2 - 1.1;
+  const nSrc = ctx.createBufferSource(); nSrc.buffer = noise;
+  const nFilter = ctx.createBiquadFilter(); nFilter.type = 'highpass'; nFilter.frequency.value = 1100;
+  const nGain = ctx.createGain(); 
+  nGain.gain.setValueAtTime(0.45, now);
+  nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+  nSrc.connect(nFilter).connect(nGain).connect(ctx.destination);
+  nSrc.start(now);
+}
+
+// Level Up - som de conquista
+function soundLevelUp(ctx: AudioContext) {
+  const notes = [440, 554, 659, 880, 1100];
+  notes.forEach((f, i) => {
+    playTone(ctx, f, 0.42, 'sine', 0.18, i * 0.09);
+  });
+  playTone(ctx, 1320, 0.65, 'triangle', 0.12, 0.45);
+}
+
+// Game Over - mais dramático
+function soundGameOver(ctx: AudioContext) {
+  [520, 440, 360, 280].forEach((f, i) => {
+    playTone(ctx, f, 0.45, 'sawtooth', 0.14, i * 0.13);
   });
 }
+
 function soundError(ctx: AudioContext) {
-  playTone(ctx, 150, 0.15, 'sawtooth', 0.12);
-  playTone(ctx, 110, 0.2, 'sawtooth', 0.12, 0.05);
+  playTone(ctx, 180, 0.22, 'sawtooth', 0.18);
+  playTone(ctx, 120, 0.35, 'sawtooth', 0.12, 0.12);
 }
 
+// Voz mais energética e natural (inglês animado)
 function speak(text: string) {
   if (!('speechSynthesis' in window)) return;
+
   window.speechSynthesis.cancel();
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'en-US';
-  utterance.pitch = 1.1;
-  utterance.rate = 1.15;
+  utterance.pitch = 1.15;      // mais animado
+  utterance.rate = 1.08;       // um pouco mais rápido
+  utterance.volume = 0.92;
+
+  // Tenta usar vozes mais naturais (melhor no Android)
+  const voices = window.speechSynthesis.getVoices();
+  const goodVoice = voices.find(v => 
+    v.name.includes('Samantha') || 
+    v.name.includes('Karen') || 
+    v.name.includes('Google') ||
+    v.name.includes('Natural')
+  );
+  if (goodVoice) utterance.voice = goodVoice;
+
   window.speechSynthesis.speak(utterance);
 }
 
@@ -448,7 +488,7 @@ export default function App() {
   }, [soundEnabled]);
 
   // ── Nível: threshold cresce com o nível ──
-  const levelThreshold = (lvl: number) => lvl * 300;
+  const levelThreshold = (lvl: number) => lvl * GAME_CONFIG.LEVEL_SCORE_INTERVAL;
 
   // ── Cores disponíveis por nível ──
   const getAvailableColors = (lvl: number): Color[] => {
@@ -1051,7 +1091,7 @@ export default function App() {
             localStorage.setItem('colorStackHighScore', nextScore.toString());
           }
 
-          const nextLevel = Math.max(currentLevel, Math.floor(nextScore / 300) + 1);
+          const nextLevel = Math.max(currentLevel, Math.floor(nextScore / GAME_CONFIG.LEVEL_SCORE_INTERVAL) + 1);
           const finalBoard = boardAfterGravity;
 
           setClearingCells(new Set());
@@ -1301,7 +1341,7 @@ export default function App() {
   const levelColor = LEVEL_COLORS[(level - 1) % LEVEL_COLORS.length];
   const safeScore = Number(score) || 0;
   const safeLevel = Number(level) || 1;
-  const levelProgress = Math.max(0, Math.min((safeScore - (safeLevel - 1) * 300) / 300, 1)) || 0;
+  const levelProgress = Math.max(0, Math.min((safeScore - (safeLevel - 1) * GAME_CONFIG.LEVEL_SCORE_INTERVAL) / GAME_CONFIG.LEVEL_SCORE_INTERVAL, 1)) || 0;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-between p-4 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden font-sans pt-8 pb-12">
