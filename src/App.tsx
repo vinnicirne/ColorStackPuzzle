@@ -853,15 +853,30 @@ export default function App() {
     }
   }, [showStats]);
 
-  // Grava progresso automaticamente
+  // ── Auto-Refresh de Peças (Garante que nunca fique sem jogar) ──
   useEffect(() => {
-    if (gameState === 'playing' || gameState === 'levelup' || gameState === 'gameover') {
-      localStorage.setItem('colorStackLevel', level.toString());
-      localStorage.setItem('colorStackScore', score.toString());
-      localStorage.setItem('colorStackBoard', JSON.stringify(board));
-      localStorage.setItem('colorStackPieces', JSON.stringify(currentPieces));
+    if (gameState === 'playing' && !isClearing && currentPieces.length === 0) {
+      const simBoard = board.map(row => [...row]);
+      const newPieces = [
+        generatePiece(level, simBoard, false),
+        generatePiece(level, simBoard, false),
+        generatePiece(level, simBoard, false)
+      ];
+      setCurrentPieces(newPieces);
     }
-  }, [level, score, board, currentPieces, gameState]);
+  }, [currentPieces.length, isClearing, gameState, level, board, generatePiece]);
+
+  // ── Game Over Watcher ──
+  useEffect(() => {
+    if (gameState === 'playing' && !isClearing && currentPieces.length > 0) {
+      if (checkGameOver(currentPieces, board)) {
+        setGameState('gameover');
+        updateStats(score, level);
+      }
+    }
+  }, [currentPieces, board, isClearing, gameState, checkGameOver, updateStats, score, level]);
+
+  // Grava progresso automaticamente
 
   const updateStats = useCallback(async (finalScore: number, finalLevel: number) => {
     let currentHighScore = parseInt(localStorage.getItem('colorStackHighScore') || '0');
@@ -1053,32 +1068,6 @@ export default function App() {
           }
 
           setBoard(() => [...actualBoard]);
-          
-          // Refresh de peças se necessário
-          setCurrentPieces(prev => {
-            if (prev.length === 0) {
-              const simBoard = actualBoard.map(row => [...row]);
-              return [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
-            }
-            return prev;
-          });
-
-          // Verifica Game Over
-          if (checkGameOver(currentPieces, actualBoard)) { // Note: using closure checkGameOver
-             // We check with a small delay to allow state to settle
-             setTimeout(() => {
-                setBoard(b => {
-                   setCurrentPieces(p => {
-                      if (checkGameOver(p, b)) {
-                         setGameState('gameover');
-                         updateStats(currentScore, currentLevel);
-                      }
-                      return p;
-                   });
-                   return b;
-                });
-             }, 100);
-          }
         }
       } catch (err) {
         console.error('Match Cycle Error:', err);
