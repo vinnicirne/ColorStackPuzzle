@@ -944,19 +944,14 @@ export default function App() {
     // Remove a peça usando ID (mais seguro que índice)
     const remainingPieces = currentPieces.filter(p => p.id !== piece.id);
 
-    // 2. Atualiza o estado imediatamente
+    // 2. Atualiza o estado imediatamente e atomicamente
     setBoard(activeBoard);
-    setCurrentPieces(remainingPieces);
+    setCurrentPieces(prev => prev.filter(p => p.id !== piece.id));
     setDraggedPiece(null);
-
-    // Auto-seleciona a próxima peça (melhora o fluxo)
-    if (remainingPieces.length > 0) {
-      setSelectedPiece({ piece: remainingPieces[0], index: 0 });
-    } else {
-      setSelectedPiece(null);
-    }
+    setSelectedPiece(null);
 
     // 3. Processa matches e cascatas
+    const remainingCount = currentPieces.length - 1; // Previsão do contador para a lógica de refresh
     const runMatchCycle = async (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
       try {
         const matchGroups = findMatches(currentBoard);
@@ -1047,6 +1042,7 @@ export default function App() {
         } else {
           setIsClearing(false);
           let actualBoard = currentBoard.map(row => [...row]);
+          
           if (currentLevel > level) {
             const newColors = getAvailableColors(currentLevel);
             actualBoard = actualBoard.map(row => row.map(cell => (cell && Math.random() < GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) ? { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] } : null));
@@ -1055,18 +1051,33 @@ export default function App() {
             setLevel(currentLevel);
             setGameState('levelup');
           }
-          let finalPieces: Piece[];
-          if (remainingPieces.length === 0) {
-            const simBoard = actualBoard.map(row => [...row]);
-            finalPieces = [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
-          } else { 
-            finalPieces = remainingPieces; 
-          }
+
           setBoard(() => [...actualBoard]);
-          setCurrentPieces(() => [...finalPieces]);
-          if (checkGameOver(finalPieces, actualBoard)) { 
-            setGameState('gameover'); 
-            updateStats(currentScore, currentLevel); 
+          
+          // Refresh de peças se necessário
+          setCurrentPieces(prev => {
+            if (prev.length === 0) {
+              const simBoard = actualBoard.map(row => [...row]);
+              return [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
+            }
+            return prev;
+          });
+
+          // Verifica Game Over
+          if (checkGameOver(currentPieces, actualBoard)) { // Note: using closure checkGameOver
+             // We check with a small delay to allow state to settle
+             setTimeout(() => {
+                setBoard(b => {
+                   setCurrentPieces(p => {
+                      if (checkGameOver(p, b)) {
+                         setGameState('gameover');
+                         updateStats(currentScore, currentLevel);
+                      }
+                      return p;
+                   });
+                   return b;
+                });
+             }, 100);
           }
         }
       } catch (err) {
