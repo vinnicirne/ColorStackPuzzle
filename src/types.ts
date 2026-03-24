@@ -3,13 +3,18 @@ export type Color = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'orange' | 
 export interface Block {
   id: string;
   color: Color;
-  specialty?: 'star' | 'rainbow' | 'color-clear';
+  specialty?: 'star' | 'rainbow' | 'color-clear' | 'bomb' | 'color-bomb' | 'line-clear';
 }
 
 export type BoardCell = Block | null;
 
 export interface Piece {
   id: string;
-  shape: { x: number; y: number; color: Color; specialty?: 'star' | 'rainbow' | 'color-clear' }[];
+  shape: { 
+    x: number; 
+    y: number; 
+    color: Color; 
+    specialty?: 'star' | 'rainbow' | 'color-clear' | 'bomb' | 'color-bomb' | 'line-clear';
+  }[];
   position?: { r: number; c: number };
 }

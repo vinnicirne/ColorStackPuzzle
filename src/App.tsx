@@ -399,6 +399,14 @@ const PieceItem = React.memo(({
               {block && (
                 <>
                   <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
+                  {block.specialty && (
+                    <div className="absolute inset-0 flex items-center justify-center text-[7px] pointer-events-none drop-shadow-md z-10">
+                      {block.specialty === 'bomb' && '💣'}
+                      {block.specialty === 'color-bomb' && '🌀'}
+                      {block.specialty === 'line-clear' && '⚡'}
+                      {block.specialty === 'color-clear' && '✨'}
+                    </div>
+                  )}
                   <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
                 </>
               )}
@@ -499,110 +507,133 @@ export default function App() {
     return ctx;
   }, [soundEnabled]);
 
-  // ── Nível: threshold cresce com o nível ──
-  const levelThreshold = (lvl: number) => lvl * GAME_CONFIG.LEVEL_SCORE_INTERVAL;
-
-  // ── Formas disponíveis por nível ──
+  // ── Helpers de Jogo (Movidos para cima para evitar erros de declaração) ──
   const getAvailableShapes = (lvl: number) => {
     if (lvl >= 5) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1], ...SHAPES_BY_LEVEL[2]];
     if (lvl >= 3) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1]];
     return SHAPES_BY_LEVEL[0];
   };
 
-  // ── Cores disponíveis por nível ──
+  const applyGravity = (currentBoard: BoardCell[][]) => {
+    const newBoard = currentBoard.map(row => [...row]);
+    for (let c = 0; c < 8; c++) {
+      let emptyRow = 7;
+      for (let r = 7; r >= 0; r--) {
+        if (newBoard[r][c] !== null) {
+          if (r !== emptyRow) { newBoard[emptyRow][c] = newBoard[r][c]; newBoard[r][c] = null; }
+          emptyRow--;
+        }
+      }
+    }
+    return { newBoard };
+  };
+  const canPlacePiece = useCallback((p: Piece, row: number, col: number, currentBoard: BoardCell[][]) => {
+    return p.shape.every(({ x, y }) => {
+      const r = row + x, c = col + y;
+      return r >= 0 && r < 8 && c >= 0 && c < 8 && currentBoard[r][c] === null;
+    });
+  }, []);
+
+  const findMatches = (b: BoardCell[][]): { r: number; c: number }[][] => {
+    const groups: { r: number; c: number }[][] = [];
+    const visited = new Set<string>();
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (b[r][c] && !visited.has(`${r}-${c}`)) {
+          const group: { r: number; c: number }[] = [];
+          const queue = [{ r, c }];
+          const color = b[r][c]!.color;
+          visited.add(`${r}-${c}`);
+          while (queue.length > 0) {
+            const curr = queue.shift()!;
+            group.push(curr);
+            [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
+              const nr = curr.r + dr, nc = curr.c + dc;
+              if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && b[nr][nc] && !visited.has(`${nr}-${nc}`)) {
+                const nextCell = b[nr][nc]!;
+                const nextColor = nextCell.color;
+                if (color === 'rainbow' || nextColor === 'rainbow' || color === nextColor) {
+                  visited.add(`${nr}-${nc}`);
+                  queue.push({ r: nr, c: nc });
+                }
+              }
+            });
+          }
+          if (group.length >= 3) groups.push(group);
+        }
+      }
+    }
+    return groups;
+  };
+
+  const calculateMatchScore = (len: number, combo: number) => {
+    let base = 10;
+    if (len === 4) base = 19;
+    if (len >= 5) base = 32;
+    return Math.floor(base * len * Math.pow(1.42, combo - 1));
+  };
+
   const getAvailableColors = (lvl: number): Color[] => {
     if (lvl >= 11) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald', 'amber', 'fuchsia', 'indigo'];
     if (lvl >= 9) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald', 'amber', 'fuchsia'];
     if (lvl >= 7) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald'];
-    if (lvl >= 5) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'];
-    if (lvl >= 3) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
-    return ['red', 'blue', 'green', 'yellow'];
+    return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
   };
 
-  // ── Cores de fundo dinâmicas por nível ──
-  const getBoardBackgroundColor = (lvl: number): string => {
-    if (lvl >= 12) return 'from-purple-950 via-indigo-950 to-black';
-    if (lvl >= 9)  return 'from-rose-950 via-purple-950 to-black';
-    if (lvl >= 6)  return 'from-amber-950 via-orange-950 to-black';
-    if (lvl >= 4)  return 'from-emerald-950 via-cyan-950 to-black';
-    return 'from-zinc-950 via-slate-950 to-black';
+  // ── Temas por Fase (Cores + Partículas) ──
+  const getPhaseTheme = (lvl: number) => {
+    if (lvl >= 15) return { bg: 'from-violet-950 via-purple-950 to-black', particleColor: '#c026d3', intensity: 1.8 };
+    if (lvl >= 12) return { bg: 'from-indigo-950 via-purple-950 to-black', particleColor: '#7c3aed', intensity: 1.5 };
+    if (lvl >= 9)  return { bg: 'from-rose-950 via-purple-950 to-black', particleColor: '#e11d48', intensity: 1.3 };
+    if (lvl >= 6)  return { bg: 'from-amber-950 via-orange-950 to-black', particleColor: '#f59e0b', intensity: 1.1 };
+    if (lvl >= 4)  return { bg: 'from-cyan-950 via-emerald-950 to-black', particleColor: '#22d3ee', intensity: 0.9 };
+    return { bg: 'from-zinc-950 via-slate-950 to-black', particleColor: '#64748b', intensity: 0.6 };
   };
 
-  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null): Piece => {
+  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false): Piece => {
     const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
-    const occupancy = boardToUpdate ? boardToUpdate.flat().filter(c => c).length / 64 : 0;
-    const isJokerEra = lvl >= 7 || occupancy > 0.78;
+    const occupancy = boardToUpdate ? boardToUpdate.flat().filter(c => c !== null).length / 64 : 0;
+    const isJokerEra = lvl >= 7 || occupancy > 0.75;
 
-    // ── FORÇA MATCH GARANTIDO (Misericórdia) ──
-    if (boardToUpdate) {
-      const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
+    const getSpecialty = (): any => {
+      const chance = lvl >= 10 ? 0.32 : lvl >= 7 ? 0.25 : 0.16;
+      if (Math.random() > chance) return undefined;
+      const roll = Math.random();
+      if (roll < 0.35) return 'bomb';
+      if (roll < 0.70) return 'color-bomb';
+      return 'line-clear';
+    };
 
-      for (const shapeTemplate of shuffledShapes) {
-        const maxX = Math.max(...shapeTemplate.map(s => s[0]));
-        const maxY = Math.max(...shapeTemplate.map(s => s[1]));
-
+    if (boardToUpdate && (forceMatch || Math.random() < 0.85)) {
+      const shuffled = [...shapes].sort(() => Math.random() - 0.5);
+      for (const template of shuffled) {
+        const maxX = Math.max(...template.map(s => s[0])), maxY = Math.max(...template.map(s => s[1]));
         for (let r = 0; r <= 8 - maxX - 1; r++) {
           for (let c = 0; c <= 8 - maxY - 1; c++) {
-            // Verifica se cabe
-            if (!shapeTemplate.every(([sx, sy]) => {
-              const tr = r + sx, tc = c + sy;
-              return tr >= 0 && tr < 8 && tc >= 0 && tc < 8 && boardToUpdate[tr][tc] === null;
-            })) continue;
-
-            // Simula o placement e verifica se gera match
+            if (!canPlacePiece({ id: '', shape: template.map(([x,y]) => ({x, y, color: 'red' as Color})) }, r, c, boardToUpdate)) continue;
             const simBoard = boardToUpdate.map(row => [...row]);
-            shapeTemplate.forEach(([sx, sy]) => {
-              const color = colors[Math.floor(Math.random() * colors.length)];
-              simBoard[r + sx][c + sy] = { id: 'sim', color: color as Color, specialty: undefined };
-            });
-
-            const matches = findMatches(simBoard);
-            if (matches.length > 0) {
-              // Gerou match → usa essa peça
-              const assigned: any[] = [];
-              const isRainbow = isJokerEra && Math.random() < 0.28;
-
-              shapeTemplate.forEach(([sx, sy]) => {
-                const color = isRainbow ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)];
-                assigned.push({
-                  x: sx,
-                  y: sy,
-                  color: color as Color,
-                  specialty: Math.random() < 0.22 ? 'color-clear' : undefined
-                });
+            template.forEach(([sx, sy]) => { simBoard[r + sx][c + sy] = { id: 'sim', color: colors[Math.floor(Math.random() * colors.length)], specialty: undefined }; });
+            if (findMatches(simBoard).length > 0) {
+              const shape: any[] = [];
+              template.forEach(([x, y]) => {
+                const color = (isJokerEra && Math.random() < 0.25) ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)] as Color;
+                shape.push({ x, y, color, specialty: getSpecialty() });
               });
-
-              return {
-                id: Math.random().toString(36).substr(2, 9),
-                shape: assigned
-              };
+              return { id: Math.random().toString(36).substr(2, 9), shape };
             }
           }
         }
       }
     }
 
-    // ── PITY FINAL (caso não encontre) ──
-    const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
-    const assigned: any[] = [];
-    const isRainbow = isJokerEra && Math.random() < 0.40; // mais coringa em fase alta
-
-    shapeTemplate.forEach(([x, y]) => {
-      const color = isRainbow ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)];
-      assigned.push({
-        x,
-        y,
-        color: color as Color,
-        specialty: Math.random() < 0.28 ? 'color-clear' : undefined
-      });
-    });
-
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      shape: assigned
-    };
-  }, []);
+    const template = shapes[Math.floor(Math.random() * shapes.length)];
+    const shape = template.map(([x, y]) => ({
+      x, y, color: (isJokerEra && Math.random() < 0.35) ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)] as Color,
+      specialty: getSpecialty()
+    }));
+    return { id: Math.random().toString(36).substr(2, 9), shape };
+  }, [getAvailableShapes, getAvailableColors, canPlacePiece]);
 
   const startNewGame = useCallback(() => {
     if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
@@ -843,144 +874,16 @@ export default function App() {
     });
   }, []);
 
-  const canPlacePiece = useCallback((piece: Piece, row: number, col: number, currentBoard: BoardCell[][]) => {
-    return piece.shape.every(({ x, y }) => {
-      const r = row + x;
-      const c = col + y;
-      return r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && currentBoard[r][c] === null;
-    });
-  }, []);
-
-  const checkGameOver = useCallback((pieces: Piece[], currentBoard: BoardCell[][]) => {
+  const checkGameOver = (pieces: Piece[], currentBoard: BoardCell[][]) => {
     if (pieces.length === 0) return false;
-    // Cache de Board para evitar cálculos pesados inúteis
-    const boardHash = currentBoard.flat().reduce((acc, cell) => acc + (cell ? cell.color[0] : '0'), '');
-    
     for (const piece of pieces) {
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
           if (canPlacePiece(piece, r, c, currentBoard)) return false;
         }
       }
     }
     return true;
-  }, [canPlacePiece]);
-
-  const findMatches = (currentBoard: BoardCell[][]) => {
-    const matchGroups: { r: number; c: number }[][] = [];
-    const visited = Array(BOARD_SIZE).fill(false).map(() => Array(BOARD_SIZE).fill(false));
-    
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (currentBoard[r][c] && !visited[r][c]) {
-          const color = currentBoard[r][c]!.color;
-          const group: { r: number; c: number }[] = [];
-          const queue = [{ r, c }];
-          visited[r][c] = true;
-          
-          while (queue.length > 0) {
-            const { r: currR, c: currC } = queue.shift()!;
-            group.push({ r: currR, c: currC });
-            const neighbors = [
-              { r: currR - 1, c: currC }, { r: currR + 1, c: currC },
-              { r: currR, c: currC - 1 }, { r: currR, c: currC + 1 },
-            ];
-            for (const n of neighbors) {
-              if (n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && !visited[n.r][n.c]) {
-                const neighborCell = currentBoard[n.r][n.c];
-                const colorsMatch = neighborCell?.color === color || neighborCell?.color === 'rainbow' || color === 'rainbow';
-                if (neighborCell && colorsMatch) {
-                  visited[n.r][n.c] = true;
-                  queue.push(n);
-                }
-              }
-            }
-          }
-
-          // Otimização: Usa um Set de strings para buscas rápidas (O(1)) dentro do grupo
-          const groupSet = new Set<string>();
-          group.forEach(p => groupSet.add(`${p.r}-${p.c}`));
-
-          // Sensibilidade do Coringa: Mínimo 3 peças SEMPRE para evitar estalos involuntários de 2 blocos
-          const minRequired = 3;
-
-          // Verificamos especialidades no grupo ANTES de explodir
-          const hasColorClear = group.some(({r:gr, c:gc}) => currentBoard[gr][gc]?.specialty === 'color-clear');
-          const rainbowBlock = group.find(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow');
-
-          if (group.length >= minRequired) {
-            // Lógica Rainbow (Estrela): Agora limpa uma Cruz mais balanceada (1 linha + 1 coluna)
-            if (rainbowBlock) {
-              const { r: jr, c: jc } = rainbowBlock;
-              for (let i = 0; i < BOARD_SIZE; i++) {
-                const targets = [
-                  {r: jr, c: i}, {r: i, c: jc}
-                ];
-                targets.forEach(t => {
-                  if (t.r >= 0 && t.r < BOARD_SIZE && t.c >= 0 && t.c < BOARD_SIZE && currentBoard[t.r][t.c]) {
-                    const key = `${t.r}-${t.c}`;
-                    if (!groupSet.has(key)) {
-                      group.push({r: t.r, c: t.c});
-                      groupSet.add(key);
-                      visited[t.r][t.c] = true;
-                    }
-                  }
-                });
-              }
-            }
-            
-            // Lógica Coringa de Cor (Limpeza Total): Só dispara com 3+ peças
-            if (hasColorClear) {
-              const targetColor = color;
-              if (targetColor !== 'rainbow') { 
-                for (let br = 0; br < BOARD_SIZE; br++) {
-                  for (let bc = 0; bc < BOARD_SIZE; bc++) {
-                    const cell = currentBoard[br][bc];
-                    if (cell && cell.color === targetColor) {
-                      const key = `${br}-${bc}`;
-                      if (!groupSet.has(key)) {
-                        group.push({r: br, c: bc});
-                        groupSet.add(key);
-                        visited[br][bc] = true;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-            matchGroups.push(group);
-          }
-        }
-      }
-    }
-    return matchGroups;
-  };
-
-  const applyGravity = (currentBoard: BoardCell[][]) => {
-    const newBoard = currentBoard.map(row => [...row]);
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      let emptyRow = BOARD_SIZE - 1;
-      for (let r = BOARD_SIZE - 1; r >= 0; r--) {
-        if (newBoard[r][c] !== null) {
-          if (r !== emptyRow) {
-            newBoard[emptyRow][c] = newBoard[r][c];
-            newBoard[r][c] = null;
-          }
-          emptyRow--;
-        }
-      }
-    }
-    return { newBoard };
-  };
-
-  const calculateMatchScore = (groupSize: number, combo: number) => {
-    let base = GAME_CONFIG.SCORES.MATCH_3;
-    if (groupSize === 4) base = GAME_CONFIG.SCORES.MATCH_4;
-    if (groupSize >= 5) base = GAME_CONFIG.SCORES.MATCH_5_PLUS;
-    
-    // Combo multiplier logic: Score = base * ratio * (multiplier^combo)
-    const multiplier = Math.pow(GAME_CONFIG.SCORES.COMBO_MULTIPLIER, combo - 1);
-    return Math.round(base * groupSize * multiplier);
   };
 
 
@@ -1031,173 +934,86 @@ export default function App() {
       const matchGroups = findMatches(currentBoard);
 
       if (matchGroups.length > 0) {
+        setIsClearing(true);
         const toFlash = new Set<string>();
         const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
-        let iterationScore = 0;
+        let cycleScore = 0;
 
         matchGroups.forEach(group => {
           const groupScore = calculateMatchScore(group.length, combo);
-          iterationScore += groupScore;
-
+          cycleScore += groupScore;
           const center = group[Math.floor(group.length / 2)];
-          newFloatingPoints.push({
-            id: Math.random().toString(36).substr(2, 9),
-            r: center.r,
-            c: center.c,
-            points: groupScore,
-          });
-
+          newFloatingPoints.push({ id: Math.random().toString(36).substr(2, 9), r: center.r, c: center.c, points: groupScore });
           group.forEach(({ r, c }) => toFlash.add(`${r}-${c}`));
+          const firstCell = currentBoard[group[0].r][group[0].c];
+          if (firstCell) (window as any).triggerPixiExplosion?.(group, firstCell.color);
+        });
 
-          const firstColor = currentBoard[group[0].r][group[0].c]?.color;
-          if (firstColor) {
-            (window as any).triggerPixiExplosion?.(group, firstColor);
+        const allMatchedCells = matchGroups.flat();
+        const powerUpSet = new Set(allMatchedCells.map(c => `${c.r}-${c.c}`));
+
+        // Processa PowerUps
+        allMatchedCells.forEach(cell => {
+          const specialty = currentBoard[cell.r][cell.c]?.specialty;
+          if (!specialty) return;
+          if (specialty === 'bomb') {
+            for (let dr = -1; dr <= 1; dr++)
+              for (let dc = -1; dc <= 1; dc++) {
+                const tr = cell.r + dr, tc = cell.c + dc;
+                if (tr >= 0 && tr < 8 && tc >= 0 && tc < 8) powerUpSet.add(`${tr}-${tc}`);
+              }
+          } else if (specialty === 'color-bomb') {
+            const colorsList = getAvailableColors(currentLevel);
+            const targetColor = colorsList[Math.floor(Math.random() * colorsList.length)];
+            currentBoard.flat().forEach((b, idx) => { if (b?.color === targetColor) powerUpSet.add(`${Math.floor(idx / 8)}-${idx % 8}`); });
+          } else if (specialty === 'line-clear') {
+            for (let i = 0; i < 8; i++) { powerUpSet.add(`${cell.r}-${i}`); powerUpSet.add(`${i}-${cell.c}`); }
           }
         });
 
-        setClearingCells(toFlash);
+        setClearingCells(powerUpSet);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
         setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 350);
 
-        const shakeDuration = (combo > 1 || matchGroups.flat().length >= 5) ? 550 : 300;
-        setTimeout(() => setIsShaking(false), shakeDuration);
-
-        const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-
-        // ====================== SOM DOS COMBOS ======================
-        const audioCtx = await getAudio();   // Garante áudio antes de tocar
-
-        if (combo > 1) {
-          setComboText(`COMBO X${combo}! 🔥`);
-          if (audioCtx) soundAmazing(audioCtx);
-          speak(`Combo ${combo}`);
-        } else if (totalMatched >= 5) {
-          setComboText('AMAZING! 🔥');
-          if (audioCtx) soundAmazing(audioCtx);
-          speak('Amazing');
-        } else if (totalMatched >= 4) {
-          setComboText('GREAT! ⭐');
-          if (audioCtx) soundGreat(audioCtx);
-          speak('Great');
-        } else {
-          setComboText('CLEAR!');
-          if (audioCtx) soundClear(audioCtx);
-        }
-
+        const audioCtx = await getAudio();
+        if (combo > 1) { setComboText(`COMBO X${combo}! 🔥`); if (audioCtx) soundAmazing(audioCtx); speak(`Combo ${combo}`); }
+        else if (allMatchedCells.length >= 5) { setComboText('AMAZING! 🔥'); if (audioCtx) soundAmazing(audioCtx); speak('Amazing'); }
+        else { setComboText('CLEAR!'); if (audioCtx) soundClear(audioCtx); }
         setTimeout(() => setComboText(null), 1000);
 
-        // Fase de Gravidade + Cascata
         setTimeout(() => {
           const tempBoard = currentBoard.map(r => [...r]);
-          matchGroups.forEach(group => {
-            group.forEach(({ r, c }) => { tempBoard[r][c] = null; });
-          });
-
+          powerUpSet.forEach(s => { const [r, c] = s.split('-').map(Number); tempBoard[r][c] = null; });
           const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
-          const nextScore = currentScore + iterationScore;
-
-          if (nextScore > highScore) {
-            setHighScore(nextScore);
-            localStorage.setItem('colorStackHighScore', nextScore.toString());
-          }
-
+          const nextScore = currentScore + cycleScore;
+          if (nextScore > highScore) { setHighScore(nextScore); localStorage.setItem('colorStackHighScore', nextScore.toString()); }
           const nextLevel = Math.max(currentLevel, Math.floor(nextScore / GAME_CONFIG.LEVEL_SCORE_INTERVAL) + 1);
-          const finalBoard = boardAfterGravity;
-
-          setClearingCells(new Set());
-          setBoard(() => [...finalBoard]);
+          setBoard(() => [...boardAfterGravity]);
           setScore(nextScore);
-
-          const idsToClean = new Set(newFloatingPoints.map(np => np.id));
-          setTimeout(() => {
-            setFloatingPoints(prev => prev.filter(p => !idsToClean.has(p.id)));
-          }, 800);
-
-          if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
-          cascadeTimeoutRef.current = setTimeout(
-            () => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1),
-            GAME_CONFIG.CASCADE_DELAY
-          );
+          setClearingCells(new Set());
+          setTimeout(() => setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.some(np => np.id === p.id))), 800);
+          cascadeTimeoutRef.current = setTimeout(() => runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1), GAME_CONFIG.CASCADE_DELAY);
         }, GAME_CONFIG.FLASH_DELAY);
-
       } else {
-        // Sem mais matches → finaliza rodada
         setIsClearing(false);
-
         let actualBoard = currentBoard.map(row => [...row]);
-
         if (currentLevel > level) {
           const newColors = getAvailableColors(currentLevel);
-          actualBoard = actualBoard.map(row =>
-            row.map(cell => {
-              if (!cell) return null;
-              if (Math.random() >= GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) return null;
-              return { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] };
-            })
-          );
-
+          actualBoard = actualBoard.map(row => row.map(cell => (cell && Math.random() < GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) ? { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] } : null));
           const audioCtx = await getAudio();
           if (audioCtx) soundLevelUp(audioCtx);
-        }
-
-        let finalPieces: Piece[];
-        if (remainingPieces.length === 0) {
-          const occupancy = actualBoard.flat().filter(c => c).length / (BOARD_SIZE * BOARD_SIZE);
-          const simBoard = actualBoard.map(row => [...row]);
-
-          const p1Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P1;
-          const p2Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P2;
-          const p3Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P3;
-
-          const pieces: Piece[] = [
-            generatePiece(currentLevel, simBoard, p1Match),
-            generatePiece(currentLevel, simBoard, p2Match),
-            generatePiece(currentLevel, simBoard, p3Match)
-          ];
-          finalPieces = pieces.sort(() => Math.random() - 0.5);
-        } else {
-          finalPieces = remainingPieces;
-        }
-
-        setBoard(() => [...actualBoard]);
-        setScore(currentScore);
-        setCurrentPieces(() => [...finalPieces]);
-
-        if (currentLevel > level) {
-          const audioCtx = await getAudio();
-          if (audioCtx) soundLevelUp(audioCtx);
-
           setLevel(currentLevel);
           setGameState('levelup');
-
-          const showPhaseAd = async () => {
-            const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
-            if (isNative) {
-              try {
-                await AdMob.showInterstitial();
-                AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
-              } catch (e) {
-                console.error('Phase Ad fail', e);
-              }
-            }
-          };
-          showPhaseAd();
-
-          setPendingAfterLevel(() => () => {
-            setGameState('playing');
-            if (checkGameOver(finalPieces, actualBoard)) {
-              setGameState('gameover');
-              updateStats(currentScore, currentLevel);
-            }
-          });
-        } else {
-          if (checkGameOver(finalPieces, actualBoard)) {
-            const audioCtx = await getAudio();
-            if (audioCtx) soundGameOver(audioCtx);
-            setGameState('gameover');
-            updateStats(currentScore, currentLevel);
-          }
         }
+        let finalPieces: Piece[];
+        if (remainingPieces.length === 0) {
+          const simBoard = actualBoard.map(row => [...row]);
+          finalPieces = [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
+        } else { finalPieces = remainingPieces; }
+        setBoard(() => [...actualBoard]);
+        setCurrentPieces(() => [...finalPieces]);
+        if (checkGameOver(finalPieces, actualBoard)) { setGameState('gameover'); updateStats(currentScore, currentLevel); }
       }
     };
 
@@ -1416,6 +1232,22 @@ export default function App() {
                 const gr = Math.floor(i / 5);
                 const gc = i % 5;
                 const block = draggedPiece.piece.shape.find(b => b.x === gr && b.y === gc);
+                const isRainbow = block?.color === 'rainbow';
+                const colorClasses = {
+                  red: 'from-red-500 to-red-700',
+                  green: 'from-green-500 to-green-700',
+                  blue: 'from-blue-500 to-blue-700',
+                  yellow: 'from-yellow-400 to-yellow-600',
+                  purple: 'from-purple-500 to-purple-700',
+                  orange: 'from-orange-500 to-orange-700',
+                  pink: 'from-pink-500 to-pink-700',
+                  cyan: 'from-cyan-400 to-cyan-600',
+                  lime: 'from-lime-400 to-lime-600',
+                  indigo: 'from-indigo-500 to-indigo-700',
+                  teal: 'from-teal-400 to-teal-600',
+                  amber: 'from-amber-400 to-amber-600',
+                  fuchsia: 'from-fuchsia-500 to-fuchsia-700',
+                };
                 return (
                   <div
                     key={i}
@@ -1426,8 +1258,25 @@ export default function App() {
                   >
                     {block && (
                       <>
-                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
-                        <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
+                        <div
+                                  className={`w-full h-full rounded-md shadow-inner relative flex items-center justify-center transition-all duration-300 ${
+                                    isRainbow ? 'rainbow-bg' :
+                                    `bg-gradient-to-br ${colorClasses[block.color as keyof typeof colorClasses] || 'from-gray-400 to-gray-600'}`
+                                  }`}
+                                >
+                                  {/* Specialty Icon Overlay */}
+                                  {block.specialty && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none drop-shadow-md">
+                                      {block.specialty === 'bomb' && <span className="text-sm">💣</span>}
+                                      {block.specialty === 'color-bomb' && <span className="text-sm">🌀</span>}
+                                      {block.specialty === 'line-clear' && <span className="text-sm">⚡</span>}
+                                      {block.specialty === 'color-clear' && <span className="text-sm">✨</span>}
+                                      {block.specialty === 'star' && <span className="text-sm">⭐</span>}
+                                    </div>
+                                  )}
+
+                                  <div className="w-[70%] h-[25%] bg-white/30 rounded-full blur-[1px] -translate-y-1.5" />
+                                </div>
                       </>
                     )}
                   </div>
@@ -1675,7 +1524,7 @@ export default function App() {
             x: { duration: 0.2 },
             y: { duration: 0.2 }
           }}
-          className={`bg-gradient-to-b ${getBoardBackgroundColor(level)} p-3 rounded-[2rem] shadow-2xl border border-white/10`}
+          className={`bg-gradient-to-b ${getPhaseTheme(level).bg} p-3 rounded-[2rem] shadow-2xl border border-white/10`}
         >
           <div
             id="game-board-inner"
@@ -1719,9 +1568,11 @@ export default function App() {
               clearingCells={clearingCells}
               floatingPoints={floatingPoints}
               hintPosition={hintPosition}
+              theme={getPhaseTheme(level)}
               onCellClick={onCellClick}
               onExplosion={(group, color) => {
-                // O PixiBoard já dispara as partículas internamente
+                const audioCtx = audioCtxRef.current;
+                if (audioCtx) soundClear(audioCtx);
               }}
             />
 
