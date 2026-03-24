@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, RotateCcw, Play, Info, BarChart2, Star, Volume2, VolumeX, Share2 } from 'lucide-react';
 import { Color, BoardCell, Piece } from './types';
@@ -11,8 +11,36 @@ import { AdMob, InterstitialAdPluginEvents, BannerAdPosition, RewardAdPluginEven
 import { Device } from '@capacitor/device';
 import { Share } from '@capacitor/share';
 import { supabase } from './lib/supabase';
+import PixiBoard from './components/PixiBoard';
 
-const BOARD_SIZE = 8;
+// ─── CONFIGURAÇÕES TÉCNICAS E BALANCEAMENTO ───
+const GAME_CONFIG = {
+  BOARD_SIZE: 8,
+  LEVEL_SCORE_INTERVAL: 300,
+  JOKER_CHANCE: 0.08,
+  RAINBOW_CHANCE: 0.06,
+  GRAVITY_DELAY: 350,
+  CASCADE_DELAY: 150,
+  FLASH_DELAY: 350,
+  OCCUPANCY_STRATEGIES: {
+    MATCH_P1: 0.65,
+    MATCH_P2: 0.8,
+    MATCH_P3: 0.9,
+    SIMPLIFY: 0.85,
+    JOKER_ERA: 0.8,
+  },
+  LEVEL_UP_SURVIVAL_RATE: 0.6,
+  SCORES: {
+    MATCH_3: 10,
+    MATCH_4: 20,
+    MATCH_5_PLUS: 40,
+    COMBO_MULTIPLIER: 1.5,
+    MAX_PARTICLES_PER_CELL: 5,
+    MAX_GLOBAL_PARTICLES: 100,
+  }
+};
+
+const BOARD_SIZE = GAME_CONFIG.BOARD_SIZE;
 const BASE_COLORS: Color[] = ['red', 'blue', 'green', 'yellow', 'purple'];
 
 // ID dos Anúncios AdMob (Produção)
@@ -55,15 +83,20 @@ const SHAPES_BY_LEVEL = [
 ];
 
 const COLOR_MAP: Record<Color, string> = {
-  red: 'bg-gradient-to-br from-rose-400 to-rose-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(244,63,94,0.5)]',
-  blue: 'bg-gradient-to-br from-sky-300 to-sky-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(14,165,233,0.5)]',
-  green: 'bg-gradient-to-br from-lime-300 to-emerald-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(16,185,129,0.5)]',
-  yellow: 'bg-gradient-to-br from-yellow-100 to-yellow-400 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(253,224,71,0.5)]',
-  purple: 'bg-gradient-to-br from-fuchsia-400 to-purple-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(139,92,246,0.5)]',
-  orange: 'bg-gradient-to-br from-orange-500 to-red-600 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(234,88,12,0.5)]',
-  pink: 'bg-gradient-to-br from-pink-400 to-rose-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(236,72,153,0.5)]',
-  cyan: 'bg-gradient-to-br from-cyan-300 to-sky-500 shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),_0_0_15px_rgba(6,182,212,0.5)]',
-  rainbow: 'joker-rainbow block-shadow',
+  red: 'bg-gradient-to-br from-rose-500 to-rose-600 shadow-lg shadow-rose-500/20 border border-white/10 will-change-transform',
+  blue: 'bg-gradient-to-br from-sky-500 to-sky-600 shadow-lg shadow-sky-500/20 border border-white/10 will-change-transform',
+  green: 'bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-lg shadow-emerald-500/20 border border-white/10 will-change-transform',
+  yellow: 'bg-gradient-to-br from-amber-400 to-amber-500 shadow-lg shadow-amber-500/20 border border-white/10 will-change-transform',
+  purple: 'bg-gradient-to-br from-violet-500 to-violet-600 shadow-lg shadow-violet-500/20 border border-white/10 will-change-transform',
+  orange: 'bg-gradient-to-br from-orange-500 to-orange-600 shadow-lg shadow-orange-500/20 border border-white/10 will-change-transform',
+  pink: 'bg-gradient-to-br from-pink-500 to-pink-600 shadow-lg shadow-pink-500/20 border border-white/10 will-change-transform',
+  cyan: 'bg-gradient-to-br from-cyan-400 to-cyan-500 shadow-lg shadow-cyan-500/20 border border-white/10 will-change-transform',
+  lime: 'bg-gradient-to-br from-lime-500 to-lime-600 shadow-lg shadow-lime-500/20 border border-white/10 will-change-transform',
+  emerald: 'bg-gradient-to-br from-emerald-600 to-emerald-700 shadow-lg shadow-emerald-700/20 border border-white/10 will-change-transform',
+  amber: 'bg-gradient-to-br from-amber-600 to-amber-700 shadow-lg shadow-amber-700/20 border border-white/10 will-change-transform',
+  fuchsia: 'bg-gradient-to-br from-fuchsia-500 to-fuchsia-600 shadow-lg shadow-fuchsia-500/20 border border-white/10 will-change-transform',
+  indigo: 'bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-lg shadow-indigo-500/20 border border-white/10 will-change-transform',
+  rainbow: 'joker-rainbow border border-white/30 will-change-transform',
 };
 
 const LEVEL_COLORS: string[] = [
@@ -77,14 +110,7 @@ const LEVEL_COLORS: string[] = [
 
 type GameState = 'menu' | 'playing' | 'ad' | 'gameover' | 'levelup';
 
-type Particle = {
-  id: string;
-  x: number;
-  y: number;
-  color: string;
-  dx: number;
-  dy: number;
-};
+
 
 // ─── Áudio Sintético via Web Audio API ───────────────────────
 function createAudioCtx(): AudioContext | null {
@@ -114,12 +140,17 @@ function playTone(ctx: AudioContext, freq: number, duration: number, type: Oscil
 }
 
 function soundPlace(ctx: AudioContext) {
-  playTone(ctx, 300, 0.08, 'sine', 0.1);
+  const baseFreq = 280 + Math.random() * 60;       // 280–340 Hz
+  const vol = 0.08 + Math.random() * 0.07;         // 0.08–0.15
+  playTone(ctx, baseFreq, 0.06 + Math.random() * 0.05, 'sine', vol);
+  // Adiciona um "click" sutil de ataque
+  playTone(ctx, baseFreq * 2.5, 0.02, 'square', 0.04, 0.005);
 }
 function soundClear(ctx: AudioContext) {
-  playTone(ctx, 440, 0.15, 'triangle', 0.15);
-  playTone(ctx, 660, 0.15, 'triangle', 0.12, 0.08); // note, duration, type, vol, delay
-  playTone(ctx, 880, 0.2, 'triangle', 0.1, 0.16);
+  const root = 400 + Math.random() * 80;
+  playTone(ctx, root, 0.12, 'triangle', 0.12);
+  playTone(ctx, root * 1.5, 0.10, 'triangle', 0.10, 0.04);
+  playTone(ctx, root * 2, 0.14, 'triangle', 0.08, 0.10);
 }
 function soundLevelUp(ctx: AudioContext) {
   [261, 329, 392, 523].forEach((f, i) => {
@@ -132,13 +163,15 @@ function soundGameOver(ctx: AudioContext) {
   });
 }
 function soundGreat(ctx: AudioContext) {
-  // EXTOURO (Noise)
-  const b = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+  // Noise burst filtrado para o "estalo" inicial
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
   for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
   const s = ctx.createBufferSource(); s.buffer = b;
-  const g = ctx.createGain(); g.gain.setValueAtTime(0.1, ctx.currentTime);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.25, ctx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-  s.connect(g); g.connect(ctx.destination); s.start(); s.stop(ctx.currentTime + 0.12);
+  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1000;
+  s.connect(f).connect(g).connect(ctx.destination);
+  s.start();
 
   playTone(ctx, 110, 0.12, 'sawtooth', 0.15); 
   [523, 659, 783].forEach((f, i) => {
@@ -146,26 +179,32 @@ function soundGreat(ctx: AudioContext) {
   });
 }
 function soundAmazing(ctx: AudioContext) {
-  // Camada 1: O "Estalo" (Noise High-Pass)
-  const b = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
-  for (let i = 0; i < b.length; i++) b.getChannelData(0)[i] = Math.random() * 2 - 1;
-  const s = ctx.createBufferSource(); s.buffer = b;
-  const g = ctx.createGain(); g.gain.setValueAtTime(0.3, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-  s.connect(g); g.connect(ctx.destination); s.start(); s.stop(ctx.currentTime + 0.15);
+  // Noise burst mais longo e filtrado (High-pass agressivo)
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
+  for (let i = 0; i < noise.length; i++) noise.getChannelData(0)[i] = Math.random() * 2 - 1;
+  const noiseSrc = ctx.createBufferSource(); noiseSrc.buffer = noise;
+  const noiseGain = ctx.createGain(); noiseGain.gain.setValueAtTime(0.4, ctx.currentTime);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+  const filter = ctx.createBiquadFilter(); filter.type = 'highpass'; filter.frequency.value = 1200;
+  noiseSrc.connect(filter).connect(noiseGain).connect(ctx.destination);
+  noiseSrc.start();
 
-  // Camada 2: O "Rurro" (Bass Sweep)
-  const os = ctx.createOscillator(); const gn = ctx.createGain();
-  os.type = 'sawtooth'; os.frequency.setValueAtTime(140, ctx.currentTime);
-  os.frequency.exponentialRampToValueAtTime(30, ctx.currentTime + 0.4);
-  gn.gain.setValueAtTime(0.15, ctx.currentTime);
-  gn.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-  os.connect(gn); gn.connect(ctx.destination); os.start(); os.stop(ctx.currentTime + 0.4);
+  // Bass sweep mais agressivo (Sawtooth impact)
+  const bass = ctx.createOscillator(); bass.type = 'sawtooth';
+  bass.frequency.setValueAtTime(180, ctx.currentTime);
+  bass.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.45);
+  const bassGain = ctx.createGain(); bassGain.gain.setValueAtTime(0.2, ctx.currentTime);
+  bassGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+  bass.connect(bassGain).connect(ctx.destination); bass.start(); bass.stop(ctx.currentTime + 0.45);
 
-  // Camada 3: Melodia Atômica
-  [523, 659, 783, 1046, 1318].forEach((f, i) => {
-    playTone(ctx, f, 0.2, 'square', 0.12, i * 0.04);
+  // Melodia triunfal com delay sutil e frequências mais altas
+  [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => {
+    playTone(ctx, f, 0.18, 'square', 0.10, i * 0.06 + 0.05);
   });
+}
+function soundError(ctx: AudioContext) {
+  playTone(ctx, 150, 0.15, 'sawtooth', 0.12);
+  playTone(ctx, 110, 0.2, 'sawtooth', 0.12, 0.05);
 }
 
 function speak(text: string) {
@@ -177,6 +216,148 @@ function speak(text: string) {
   utterance.rate = 1.15;
   window.speechSynthesis.speak(utterance);
 }
+
+// ─────────────────────────────────────────────────────────────
+
+
+interface PieceItemProps {
+  piece: Piece;
+  idx: number;
+  board: BoardCell[][];
+  isClearing: boolean;
+  selectedPieceIndex?: number;
+  gameState: GameState;
+  onPieceClick: (p: Piece, i: number) => void;
+  setDraggedPiece: (p: { piece: Piece; index: number } | null) => void;
+  setSelectedPiece: (p: { piece: Piece; index: number } | null) => void;
+  setTouchFloatPos: (p: { x: number; y: number } | null) => void;
+  setHoverCellFast: (p: { r: number; c: number } | null) => void;
+  handlePiecePlacement: (p: Piece, r: number, c: number, i: number) => void;
+  canPlacePiece: (piece: Piece, row: number, col: number, currentBoard: BoardCell[][]) => boolean;
+  cellSize: number;
+  touchDragRef: React.MutableRefObject<{ piece: Piece; index: number; targetR: number; targetC: number } | null>;
+  touchFloatRef: React.MutableRefObject<HTMLDivElement | null>;
+  checkGameOver: (pieces: Piece[], currentBoard: BoardCell[][]) => boolean;
+}
+
+const PieceItem = React.memo(({ 
+  piece, idx, board, isClearing, selectedPieceIndex, gameState, 
+  onPieceClick, setDraggedPiece, setSelectedPiece, setTouchFloatPos, 
+  setHoverCellFast, handlePiecePlacement, canPlacePiece, cellSize, touchDragRef, 
+  touchFloatRef, checkGameOver 
+}: PieceItemProps) => {
+  const canPlace = useMemo(() => isClearing ? false : checkGameOver([piece], board) === false, [piece, board, isClearing]);
+  const isSelected = selectedPieceIndex === idx;
+
+  return (
+    <motion.div
+      draggable
+      style={{ touchAction: 'none' }}
+      whileHover={canPlace ? { scale: 1.08, y: -4 } : {}}
+      whileTap={canPlace ? { scale: 0.95 } : {}}
+      onDragStart={(e: any) => {
+        const ghost = new Image();
+        ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        (e as any).dataTransfer.setDragImage(ghost, 0, 0);
+        (e as any).dataTransfer.setData('text/plain', '');
+        setDraggedPiece({ piece, index: idx });
+        setSelectedPiece(null);
+      }}
+      onDragEnd={() => { setDraggedPiece(null); setHoverCellFast(null); }}
+      onTouchStart={(e) => {
+        if (!canPlace) return;
+        const touch = e.touches[0];
+        setDraggedPiece({ piece, index: idx });
+        setSelectedPiece(null);
+        setTouchFloatPos({ x: touch.clientX, y: touch.clientY - 30 });
+        touchDragRef.current = { piece, index: idx, targetR: -1, targetC: -1 };
+      }}
+      onTouchMove={(e) => {
+        if (!touchDragRef.current) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        if (touchFloatRef.current) {
+          const fb = touchDragRef.current!.piece.shape[0];
+          touchFloatRef.current.style.left = `${touch.clientX - (fb.y * cellSize + cellSize / 2)}px`;
+          touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2) - 30}px`;
+        }
+
+        const boardEl = document.getElementById('game-board-inner');
+        if (boardEl) {
+          const rect = boardEl.getBoundingClientRect();
+          const relX = touch.clientX - rect.left;
+          const relY = (touch.clientY - 30) - rect.top;
+          
+          const c = Math.floor(relX / cellSize);
+          const r = Math.floor(relY / cellSize);
+
+          if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+            touchDragRef.current.targetR = r;
+            touchDragRef.current.targetC = c;
+            setHoverCellFast({ r, c });
+          } else {
+            touchDragRef.current.targetR = -1;
+            touchDragRef.current.targetC = -1;
+            setHoverCellFast(null);
+          }
+        }
+      }}
+      onTouchEnd={() => {
+        const state = touchDragRef.current;
+        if (state && state.targetR >= 0 && state.targetC >= 0) {
+          const fb = state.piece.shape[0];
+          handlePiecePlacement(state.piece, state.targetR - fb.x, state.targetC - fb.y, state.index);
+        }
+        touchDragRef.current = null;
+        setDraggedPiece(null);
+        setHoverCellFast(null);
+        setTouchFloatPos(null);
+      }}
+      onClick={() => onPieceClick(piece, idx)}
+      animate={{
+        scale: isSelected ? 1.1 : 1,
+        y: isSelected ? -10 : 0,
+        opacity: gameState !== 'playing' ? 0.5 : canPlace ? 1 : 0.3,
+      }}
+      className={`cursor-grab active:cursor-grabbing transition-all p-2 rounded-xl flex items-center justify-center ${
+        !canPlace ? 'grayscale pointer-events-none' : ''
+      } ${isSelected ? 'bg-white/10 ring-2 ring-sky-500' : 'hover:bg-white/5'}`}
+    >
+      <div
+        className="grid gap-1"
+        style={{ gridTemplateColumns: `repeat(5, 1fr)`, gridTemplateRows: `repeat(5, 1fr)` }}
+      >
+        {Array.from({ length: 25 }).map((_, i) => {
+          const r = Math.floor(i / 5);
+          const c = i % 5;
+          const minX = Math.min(...piece.shape.map(b => b.x));
+          const maxX = Math.max(...piece.shape.map(b => b.x));
+          const minY = Math.min(...piece.shape.map(b => b.y));
+          const maxY = Math.max(...piece.shape.map(b => b.y));
+          const shiftX = Math.floor((5 - (maxX - minX + 1)) / 2) - minX;
+          const shiftY = Math.floor((5 - (maxY - minY + 1)) / 2) - minY;
+
+          const block = piece.shape.find(b => b.x + shiftX === r && b.y + shiftY === c);
+          return (
+            <div
+              key={i}
+              className={`w-3 h-3 sm:w-4 sm:h-4 rounded-sm ${
+                block ? `${COLOR_MAP[block.color]}` : 'bg-white/5 shadow-inner'
+              } relative overflow-hidden`}
+            >
+              {block && (
+                <>
+                  <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
+                  <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+});
 
 // ─────────────────────────────────────────────────────────────
 
@@ -198,13 +379,18 @@ export default function App() {
   const [comboText, setComboText] = useState<string | null>(null);
   const [floatingPoints, setFloatingPoints] = useState<{ id: string; r: number; c: number; points: number }[]>([]);
   const [clearingCells, setClearingCells] = useState<Set<string>>(new Set());
-  const [particles, setParticles] = useState<Particle[]>([]);
+
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [pendingAfterLevel, setPendingAfterLevel] = useState<(() => void) | null>(null);
   const [hoverCell, setHoverCell] = useState<{ r: number; c: number } | null>(null);
   const [touchFloatPos, setTouchFloatPos] = useState<{ x: number; y: number } | null>(null);
   const [isShaking, setIsShaking] = useState(false);
   const [boardWidth, setBoardWidth] = useState(400);
+  const [revivedOnce, setRevivedOnce] = useState(false);
+  const [globalTop, setGlobalTop] = useState<{ high_score: number; max_level: number }[]>([]);
+  const [showDailyModal, setShowDailyModal] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [dailyBonusActive, setDailyBonusActive] = useState(false);
 
 
 
@@ -214,6 +400,14 @@ export default function App() {
   // Ref para evitar setHoverCell redundante quando o dedo/cursor não mudou de célula
   const hoverCellRef = useRef<{ r: number; c: number } | null>(null);
   const cascadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup: Evita vazamento de memória e timers fantasmas ao desmontar
+  useEffect(() => {
+    return () => {
+      if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
+    };
+  }, []);
+
   const setHoverCellFast = (next: { r: number; c: number } | null) => {
     if (next === null) {
       if (hoverCellRef.current !== null) { hoverCellRef.current = null; setHoverCell(null); }
@@ -223,11 +417,33 @@ export default function App() {
     }
   };
 
-  const getAudio = useCallback(async () => {
+  // Global Resume Audio on Interaction (Essential for Mobile/Capacitor)
+  useEffect(() => {
+    const handleInteraction = () => {
+      getAudio();
+    };
+    window.addEventListener('click', handleInteraction, { once: true });
+    window.addEventListener('touchstart', handleInteraction, { once: true });
+  }, []);
+
+  const getAudio = useCallback(async (): Promise<AudioContext | null> => {
     if (!soundEnabled) return null;
-    if (!audioCtxRef.current) audioCtxRef.current = createAudioCtx();
+
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = createAudioCtx();
+    }
+
     const ctx = audioCtxRef.current;
-    if (ctx?.state === 'suspended') await ctx.resume();
+    if (!ctx) return null;
+
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.warn('Failed to resume AudioContext');
+      }
+    }
+
     return ctx;
   }, [soundEnabled]);
 
@@ -236,10 +452,11 @@ export default function App() {
 
   // ── Cores disponíveis por nível ──
   const getAvailableColors = (lvl: number): Color[] => {
-    if (lvl >= 9) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'];
-    if (lvl >= 7) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink'];
-    if (lvl >= 5) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
-    if (lvl >= 3) return ['red', 'blue', 'green', 'yellow', 'purple'];
+    if (lvl >= 11) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald', 'amber', 'fuchsia', 'indigo'];
+    if (lvl >= 9) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald', 'amber', 'fuchsia'];
+    if (lvl >= 7) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald'];
+    if (lvl >= 5) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'];
+    if (lvl >= 3) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
     return ['red', 'blue', 'green', 'yellow'];
   };
 
@@ -251,183 +468,97 @@ export default function App() {
   };
 
   const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false, simplifyShapes: boolean = false): Piece => {
-    const shapes = simplifyShapes ? SHAPES_BY_LEVEL[0] : getAvailableShapes(lvl);
+    const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
-    
-    // Performance: Calcula ocupação uma vez por chamada de geração
-    const occCount = boardToUpdate ? boardToUpdate.flat().filter(x => x).length : 0;
-    const occupancy = boardToUpdate ? occCount / 64 : 0;
-    const isJokerEra = occupancy > 0.8;
+    const occupancy = boardToUpdate ? boardToUpdate.flat().filter(x => x).length / 64 : 0;
+    const isJokerEra = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.JOKER_ERA;
 
-    const finalizeAt = (p: Piece, row: number, col: number) => {
-      if (boardToUpdate) {
-        p.shape.forEach(b => {
-          const tr = row + b.x; const tc = col + b.y;
-          if (tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE) {
-            boardToUpdate[tr][tc] = { id: 'reserved', color: b.color };
-          }
-        });
-      }
-      return p;
+    // Otimização Sênior: Função pura, sem mutação do board de entrada
+    const generateBlock = (c: Color): { x: number; y: number; color: Color; specialty?: 'color-clear' } => {
+      let jokerProb = GAME_CONFIG.JOKER_CHANCE;
+      if (dailyBonusActive) jokerProb *= 2;
+      
+      const isColorJoker = Math.random() < jokerProb;
+      return { x: 0, y: 0, color: c, specialty: isColorJoker ? 'color-clear' : undefined };
     };
     
     // 1. TENTATIVA DE GERAÇÃO INTELIGENTE (RESERVA DE ESPAÇO)
     if (boardToUpdate) {
       const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
       let firstSpotFound: { p: Piece; r: number; c: number } | null = null;
-      let bestMatchFound: { p: Piece; r: number; c: number } | null = null;
 
       for (const shapeTemplate of shuffledShapes) {
-        for (let r = 0; r < BOARD_SIZE; r++) {
-          for (let c = 0; c < BOARD_SIZE; c++) {
+        const maxX = Math.max(...shapeTemplate.map(s => s[0]));
+        const maxY = Math.max(...shapeTemplate.map(s => s[1]));
+        for (let r = 0; r <= BOARD_SIZE - maxX - 1; r++) {
+          for (let c = 0; c <= BOARD_SIZE - maxY - 1; c++) {
             if (shapeTemplate.every(([sx, sy]) => {
               const tr = r + sx; const tc = c + sy;
               return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && boardToUpdate[tr][tc] === null;
             })) {
-              const assigned: { x: number; y: number; color: Color }[] = [];
-              const pLen = shapeTemplate.length;
-
+              const assigned: { x: number; y: number; color: Color; specialty?: 'color-clear' }[] = [];
+              let bestMatchedColor: Color | null = null;
+              
               if (forceMatch) {
-                let bestMatchedColor: Color | null = null;
-                let fallbackColor: Color | null = null;
-
                 for (const tCol of colors) {
-                  let totalClusterSize = 1; // Começa em 1 (o bloco atual que toca o vizinho)
-                  const v = new Set<string>();
-                  const q: {r:number, c:number}[] = [];
-                  shapeTemplate.forEach(([sx,sy]) => { q.push({r:r+sx, c:c+sy}); v.add(`${r+sx}-${c+sy}`); });
-
-                  let foundNeighbor = false;
-                  while (q.length > 0) {
-                    const cur = q.shift()!;
-                    [{r:cur.r-1,c:cur.c},{r:cur.r+1,c:cur.c},{r:cur.r,c:cur.c-1},{r:cur.r,c:cur.c+1}].forEach(nn => {
-                      if (nn.r>=0 && nn.r<BOARD_SIZE && nn.c>=0 && nn.c<BOARD_SIZE && !v.has(`${nn.r}-${nn.c}`)) {
-                        const cell = boardToUpdate[nn.r][nn.c];
-                        if (cell && cell.color === tCol) {
-                          v.add(`${nn.r}-${nn.c}`); q.push(nn);
-                          if (cell.id !== 'reserved') { totalClusterSize++; foundNeighbor = true; }
-                        }
-                      }
-                    });
-                  }
-                  // Só considera Match Útil se a peça ajudar a completar (ou seja, se a soma com vizinhos for >= 3)
-                  if (totalClusterSize >= 3 && foundNeighbor) { bestMatchedColor = tCol; break; }
-                  if (foundNeighbor && !fallbackColor) fallbackColor = tCol;
+                  const hasNeighbor = shapeTemplate.some(([sx, sy]) => {
+                    const nr = r + sx; const nc = c + sy;
+                    return [{r:nr-1,c:nc},{r:nr+1,c:nc},{r:nr,c:nc-1},{r:nr,c:nc+1}].some(n => 
+                      n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && 
+                      boardToUpdate[n.r][n.c]?.color === tCol
+                    );
+                  });
+                  if (hasNeighbor) { bestMatchedColor = tCol; break; }
                 }
-
-                // UPGRADE JOKER: Se em crise, chance da cor de match virar Coringa (Rainbow)
-                const fCol = (forceMatch && isJokerEra && Math.random() > 0.7) 
-                  ? 'rainbow' 
-                  : (bestMatchedColor || fallbackColor || colors[Math.floor(Math.random() * colors.length)]);
-
-                shapeTemplate.forEach(([sx, sy]) => {
-                  let bColor = colors[Math.floor(Math.random() * colors.length)];
-                  const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
-                    .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === fCol);
-                  if (isBridge || fCol === 'rainbow') bColor = fCol as Color;
-                  assigned.push({ x: sx, y: sy, color: bColor });
-                });
-                const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
-                if (bestMatchedColor) return finalizeAt(newP, r, c);
-                if (!bestMatchFound) bestMatchFound = { p: newP, r, c };
-              } else {
-                shapeTemplate.forEach(([sx, sy]) => {
-                  assigned.push({ x: sx, y: sy, color: colors[Math.floor(Math.random() * colors.length)] });
-                });
-                return finalizeAt({ id: Math.random().toString(36).substr(2, 9), shape: assigned }, r, c);
               }
+
+              const fCol = (forceMatch && isJokerEra && Math.random() > 0.7) 
+                ? 'rainbow' 
+                : (bestMatchedColor || colors[Math.floor(Math.random() * colors.length)]);
+
+              shapeTemplate.forEach(([sx, sy]) => {
+                let bColor = colors[Math.floor(Math.random() * colors.length)];
+                const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
+                  .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === fCol);
+                
+                if (isBridge || fCol === 'rainbow') bColor = fCol as Color;
+                const blk = generateBlock(bColor);
+                assigned.push({ x: sx, y: sy, color: blk.color, specialty: blk.specialty });
+              });
+              
+              return { id: Math.random().toString(36).substr(2, 9), shape: assigned, position: { r, c } };
             }
           }
         }
-      }
-      if (bestMatchFound) return finalizeAt(bestMatchFound.p, bestMatchFound.r, bestMatchFound.c);
-      if (firstSpotFound) return finalizeAt(firstSpotFound.p, firstSpotFound.r, firstSpotFound.c);
-
-      // 2. FALLBACK DE SOBREVIVÊNCIA (NÍVEL 1)
-      if (lvl > 1) {
-        const basicShapes = [...SHAPES_BY_LEVEL[0]].sort(() => Math.random() - 0.5);
-        let survivalFound: { p: Piece; r: number; c: number } | null = null;
-
-        for (const shapeTemplate of basicShapes) {
-          for (let r = 0; r < BOARD_SIZE; r++) {
-            for (let c = 0; c < BOARD_SIZE; c++) {
-              if (shapeTemplate.every(([sx, sy]) => {
-                const tr = r + sx; const tc = c + sy;
-                return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && boardToUpdate[tr][tc] === null;
-              })) {
-                const assigned: { x: number; y: number; color: Color }[] = [];
-                let bColor: Color | null = null;
-                let fbColor: Color | null = null;
-                const pLen = shapeTemplate.length;
-
-                for (const [sx, sy] of shapeTemplate) {
-                  const tr = r + sx; const tc = c + sy;
-                  const neighbors = [{r:tr-1,c:tc},{r:tr+1,c:tc},{r:tr,c:tc-1},{r:tr,c:tc+1}].filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
-                  for (const tCol of colors) {
-                    let totalSize = pLen; const v = new Set<string>(); const q: {r:number,c:number}[] = [];
-                    shapeTemplate.forEach(([sx,sy]) => { q.push({r:r+sx,c:c+sy}); v.add(`${r+sx}-${c+sy}`); });
-                    let touch = false;
-                    while (q.length > 0) {
-                      const cur = q.shift()!;
-                      [{r:cur.r-1,c:cur.c},{r:cur.r+1,c:cur.c},{r:cur.r,c:cur.c-1},{r:cur.r,c:cur.c+1}].forEach(nn => {
-                        if (nn.r>=0 && nn.r<BOARD_SIZE && nn.c>=0 && nn.c<BOARD_SIZE && !v.has(`${nn.r}-${nn.c}`)) {
-                          const cell = boardToUpdate[nn.r][nn.c];
-                          if (cell && cell.color === tCol) {
-                            v.add(`${nn.r}-${nn.c}`); q.push(nn);
-                            if (cell.id !== 'reserved') { totalSize++; touch = true; }
-                          }
-                        }
-                      });
-                    }
-                    if (totalSize >= 3 && touch) { bColor = tCol; break; }
-                    if (touch && !fbColor) fbColor = tCol;
-                  }
-                  if (bColor) break;
-                }
-                const sCol = bColor || fbColor || colors[Math.floor(Math.random() * colors.length)];
-                shapeTemplate.forEach(([sx, sy]) => {
-                  let bc = colors[Math.floor(Math.random() * colors.length)];
-                  const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
-                    .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === sCol);
-                  if (isBridge) bc = sCol;
-                  assigned.push({ x: sx, y: sy, color: bc });
-                });
-                const newP = { id: Math.random().toString(36).substr(2, 9), shape: assigned };
-                if (bColor) return finalizeAt(newP, r, c);
-                if (!survivalFound) survivalFound = { p: newP, r, c };
-              }
-            }
-          }
-        }
-        if (survivalFound) return finalizeAt(survivalFound.p, survivalFound.r, survivalFound.c);
       }
 
       // 3. ABSOLUTE PITY (1x1 INTELIGENTE / CORINGA)
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
           if (boardToUpdate[r][c] === null) {
-            const neighbors = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
+            const neighs = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
               .filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
             
-            // Crie um Coringa em situações de extrema urgência baseada no cache de ocupação
-            const isJoker = isJokerEra && Math.random() > 0.75;
+            let jokerProb = 0.25; // 1 - 0.75
+            if (dailyBonusActive) jokerProb = 0.5;
             
-            const tColor = isJoker ? 'rainbow' : (neighbors.length > 0 ? boardToUpdate[neighbors[0].r][neighbors[0].c]!.color : colors[Math.floor(Math.random() * colors.length)]);
-            const p = { id: isJoker ? 'joker-' + Math.random().toString(36).substr(2, 4) : 'pity-fix', shape: [{ x: 0, y: 0, color: tColor as Color }] };
-            return finalizeAt(p, r, c);
+            const isJoker = isJokerEra && Math.random() < jokerProb;
+            const tColor = isJoker ? 'rainbow' : (neighs.length > 0 ? boardToUpdate[neighs[0].r][neighs[0].c]!.color : colors[Math.floor(Math.random() * colors.length)]);
+            return { id: isJoker ? 'joker-' + Math.random().toString(36).substr(2, 4) : 'pity-fix', shape: [{ x: 0, y: 0, color: tColor as Color }], position: { r, c } };
           }
         }
       }
     }
 
-    // 4. GERAÇÃO ALEATÓRIA PADRÃO (FALLBACK GERAL)
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
-    const assigned: { x: number; y: number; color: Color }[] = [];
+    const assigned: { x: number; y: number; color: Color; specialty?: 'color-clear' }[] = [];
     shapeTemplate.forEach(([x, y]) => {
-      assigned.push({ x, y, color: colors[Math.floor(Math.random() * colors.length)] });
+      const blk = generateBlock(colors[Math.floor(Math.random() * colors.length)]);
+      assigned.push({ x, y, color: blk.color, specialty: blk.specialty });
     });
     return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
-  }, []);
+
+  }, [dailyBonusActive]);
 
   const startNewGame = useCallback(() => {
     if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
@@ -436,9 +567,11 @@ export default function App() {
     setScore(0);
     setCurrentPieces([generatePiece(1, null, false), generatePiece(1, null, false), generatePiece(1, null, false)]);
     setGameState('playing');
+    setRevivedOnce(false);
     setIsClearing(false);
     setClearingCells(new Set());
-    setParticles([]);
+
+    setDailyBonusActive(false); // Consome o bônus ao iniciar novo jogo (se vier de um game over)
     
     // Pre-load Intersticial para a próxima troca de fase (Evita LAG)
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
@@ -449,34 +582,78 @@ export default function App() {
 
   useEffect(() => {
     const updateWidth = () => {
-      const el = document.getElementById('game-board');
+      const el = document.getElementById('game-board-inner');
       if (el) setBoardWidth(el.offsetWidth);
     };
     updateWidth();
+    const timer = setTimeout(updateWidth, 100); // Garante renderização inicial
     window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+      clearTimeout(timer);
+    };
   }, []);
 
-  const cellSize = (boardWidth - (BOARD_SIZE - 1) * 6) / BOARD_SIZE;
+  const cellSize = boardWidth / BOARD_SIZE;
 
 
   useEffect(() => {
+    // ── Resgate de Estado e Limpeza Absoluta ──
+    const saved = localStorage.getItem('colorStackPuzzleState');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Proteção Crítica: Se o board no cache não for 8x8, limpa TUDO para remover o 4x4 legado
+        if (parsed.board && parsed.board.length === 8) {
+          setBoard(parsed.board);
+          setScore(parsed.score || 0);
+          setLevel(parsed.level || 1);
+          setCurrentPieces(parsed.currentPieces || []);
+        } else {
+          localStorage.clear();
+          startNewGame();
+        }
+      } catch (e) {
+        localStorage.clear();
+        startNewGame();
+      }
+    } else {
+      startNewGame();
+    }
     const savedHighScore = localStorage.getItem('colorStackHighScore');
-    if (savedHighScore) setHighScore(parseInt(savedHighScore));
+    if (savedHighScore) setHighScore(Number(savedHighScore) || 0);
     
     // Carrega estatísticas e progresso ativo
     const savedStats = localStorage.getItem('colorStackStats');
-    if (savedStats) setStats(JSON.parse(savedStats));
+    if (savedStats) {
+      try {
+        const parsed = JSON.parse(savedStats);
+        if (parsed) setStats(parsed);
+      } catch (e) { console.error('Stats load fail'); }
+    }
     
-    const savedLevel = localStorage.getItem('colorStackLevel');
-    const savedScore = localStorage.getItem('colorStackScore');
-    const savedBoard = localStorage.getItem('colorStackBoard');
-    const savedPieces = localStorage.getItem('colorStackPieces');
+    // ── Limpeza de Chaves Legadas (Prevenção de 4x4) ──
+    const legacyKeys = ['colorStackLevel', 'colorStackScore', 'colorStackBoard', 'colorStackPieces'];
+    legacyKeys.forEach(k => localStorage.removeItem(k));
     
-    if (savedLevel) setLevel(parseInt(savedLevel));
-    if (savedScore) setScore(parseInt(savedScore));
-    if (savedBoard) setBoard(JSON.parse(savedBoard));
-    if (savedPieces) setCurrentPieces(JSON.parse(savedPieces));
+    // Check Daily Reward & Streak
+    const lastDaily = localStorage.getItem('colorStackLastDaily');
+    const todayStr = new Date().toDateString();
+    const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
+    const savedStreak = parseInt(localStorage.getItem('colorStackStreak') || '0') || 0;
+
+    if (lastDaily !== todayStr) {
+      localStorage.setItem('colorStackLastDaily', todayStr);
+      let newStreak = 1;
+      if (lastDaily === yesterdayStr) {
+        newStreak = savedStreak + 1;
+      }
+      localStorage.setItem('colorStackStreak', newStreak.toString());
+      setStreak(newStreak);
+      setShowDailyModal(true);
+    } else {
+      setStreak(savedStreak);
+    }
     
     // Inicializa AdMob no Startup (Nativo)
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
@@ -491,13 +668,18 @@ export default function App() {
           .single();
         
         if (data) {
-          if (data.high_score > (parseInt(savedHighScore) || 0)) {
-            setHighScore(data.high_score);
-            localStorage.setItem('colorStackHighScore', data.high_score.toString());
+          const cloudScore = Number(data.high_score) || 0;
+          const cloudLevel = Number(data.max_level) || 1;
+          const currentHigh = Number(localStorage.getItem('colorStackHighScore')) || 0;
+          const currentLevel = Number(localStorage.getItem('colorStackLevel')) || 1;
+
+          if (cloudScore > currentHigh) {
+            setHighScore(cloudScore);
+            localStorage.setItem('colorStackHighScore', cloudScore.toString());
           }
-          if (data.max_level > (parseInt(savedLevel) || 1)) {
-             setLevel(data.max_level);
-             localStorage.setItem('colorStackLevel', data.max_level.toString());
+          if (cloudLevel > currentLevel) {
+            setLevel(cloudLevel);
+            localStorage.setItem('colorStackLevel', cloudLevel.toString());
           }
         }
       } catch (err) {
@@ -513,13 +695,22 @@ export default function App() {
           await AdMob.initialize({ initializeForTesting: false });
           
           // Mostra o Banner de Produção no rodapé
-          await AdMob.showBanner({
-            adId: AD_UNITS.BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
-            margin: 0,
-            isTesting: false,
-            adSize: BannerAdSize.ADAPTIVE_BANNER
-          });
+          // Pequeno delay para garantir que a UI nativa carregou e a WebView está pronta
+          setTimeout(async () => {
+            try {
+              await AdMob.showBanner({
+                adId: AD_UNITS.BANNER,
+                position: BannerAdPosition.BOTTOM_CENTER,
+                margin: 0,
+                isTesting: false,
+                adSize: BannerAdSize.ADAPTIVE_BANNER,
+                npa: false,
+              });
+              // Em algumas versões do plugin, o redimensionamento é automático se o container permitir
+            } catch (bannerErr) {
+              console.log('Banner lazy load fail:', bannerErr);
+            }
+          }, 1500);
 
           // PRE-LOAD & OPENING AD: Usa Intersticial como fallback (v8 plugin JS não tem App Open)
           try {
@@ -537,6 +728,22 @@ export default function App() {
       initAdMob();
     }
   }, []);
+
+  useEffect(() => {
+    if (showStats) {
+      const fetchGlobal = async () => {
+        try {
+          const { data } = await supabase
+            .from('player_stats')
+            .select('high_score, max_level')
+            .order('high_score', { ascending: false })
+            .limit(5);
+          if (data) setGlobalTop(data);
+        } catch (e) { console.error('Global leaderboard fail:', e); }
+      };
+      fetchGlobal();
+    }
+  }, [showStats]);
 
   // Grava progresso automaticamente
   useEffect(() => {
@@ -596,6 +803,9 @@ export default function App() {
 
   const checkGameOver = useCallback((pieces: Piece[], currentBoard: BoardCell[][]) => {
     if (pieces.length === 0) return false;
+    // Cache de Board para evitar cálculos pesados inúteis
+    const boardHash = currentBoard.flat().reduce((acc, cell) => acc + (cell ? cell.color[0] : '0'), '');
+    
     for (const piece of pieces) {
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
@@ -609,6 +819,7 @@ export default function App() {
   const findMatches = (currentBoard: BoardCell[][]) => {
     const matchGroups: { r: number; c: number }[][] = [];
     const visited = Array(BOARD_SIZE).fill(false).map(() => Array(BOARD_SIZE).fill(false));
+    
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE; c++) {
         if (currentBoard[r][c] && !visited[r][c]) {
@@ -616,6 +827,7 @@ export default function App() {
           const group: { r: number; c: number }[] = [];
           const queue = [{ r, c }];
           visited[r][c] = true;
+          
           while (queue.length > 0) {
             const { r: currR, c: currC } = queue.shift()!;
             group.push({ r: currR, c: currC });
@@ -626,7 +838,6 @@ export default function App() {
             for (const n of neighbors) {
               if (n.r >= 0 && n.r < BOARD_SIZE && n.c >= 0 && n.c < BOARD_SIZE && !visited[n.r][n.c]) {
                 const neighborCell = currentBoard[n.r][n.c];
-                // Rainbow (Coringa) se adapta ou o nó atual é rainbow e assume o vizinho
                 const colorsMatch = neighborCell?.color === color || neighborCell?.color === 'rainbow' || color === 'rainbow';
                 if (neighborCell && colorsMatch) {
                   visited[n.r][n.c] = true;
@@ -635,28 +846,57 @@ export default function App() {
               }
             }
           }
-          if (group.length >= 3) {
-            // Logica Especial Coringa: Se houver um 'rainbow' ativo, expande explosão em estrela
-            const hasJoker = group.some(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow');
-            if (hasJoker) {
-              const jokerPos = group.find(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow')!;
-              const starRange = [];
+
+          // Otimização: Usa um Set de strings para buscas rápidas (O(1)) dentro do grupo
+          const groupSet = new Set<string>();
+          group.forEach(p => groupSet.add(`${p.r}-${p.c}`));
+
+          // Sensibilidade do Coringa: Mínimo 3 peças SEMPRE para evitar estalos involuntários de 2 blocos
+          const minRequired = 3;
+
+          // Verificamos especialidades no grupo ANTES de explodir
+          const hasColorClear = group.some(({r:gr, c:gc}) => currentBoard[gr][gc]?.specialty === 'color-clear');
+          const rainbowBlock = group.find(({r:gr, c:gc}) => currentBoard[gr][gc]?.color === 'rainbow');
+
+          if (group.length >= minRequired) {
+            // Lógica Rainbow (Estrela): Agora limpa uma Cruz mais balanceada (1 linha + 1 coluna)
+            if (rainbowBlock) {
+              const { r: jr, c: jc } = rainbowBlock;
               for (let i = 0; i < BOARD_SIZE; i++) {
-                // Cross (+)
-                if (currentBoard[jokerPos.r][i]) starRange.push({r: jokerPos.r, c: i});
-                if (currentBoard[i][jokerPos.c]) starRange.push({r: i, c: jokerPos.c});
-                // Diagonais (X)
-                const dr = [+1, +1, -1, -1]; const dc = [+1, -1, +1, -1];
-                for (let d = 0; d < 4; d++) {
-                  const nr = jokerPos.r + i * dr[d]; const nc = jokerPos.c + i * dc[d];
-                  if (nr>=0&&nr<BOARD_SIZE&&nc>=0&&nc<BOARD_SIZE&&currentBoard[nr][nc]) starRange.push({r:nr, c:nc});
+                const targets = [
+                  {r: jr, c: i}, {r: i, c: jc}
+                ];
+                targets.forEach(t => {
+                  if (t.r >= 0 && t.r < BOARD_SIZE && t.c >= 0 && t.c < BOARD_SIZE && currentBoard[t.r][t.c]) {
+                    const key = `${t.r}-${t.c}`;
+                    if (!groupSet.has(key)) {
+                      group.push({r: t.r, c: t.c});
+                      groupSet.add(key);
+                      visited[t.r][t.c] = true;
+                    }
+                  }
+                });
+              }
+            }
+            
+            // Lógica Coringa de Cor (Limpeza Total): Só dispara com 3+ peças
+            if (hasColorClear) {
+              const targetColor = color;
+              if (targetColor !== 'rainbow') { 
+                for (let br = 0; br < BOARD_SIZE; br++) {
+                  for (let bc = 0; bc < BOARD_SIZE; bc++) {
+                    const cell = currentBoard[br][bc];
+                    if (cell && cell.color === targetColor) {
+                      const key = `${br}-${bc}`;
+                      if (!groupSet.has(key)) {
+                        group.push({r: br, c: bc});
+                        groupSet.add(key);
+                        visited[br][bc] = true;
+                      }
+                    }
+                  }
                 }
               }
-              starRange.forEach(cell => { 
-                if (!group.some(ex => ex.r===cell.r && ex.c===cell.c)) {
-                  group.push(cell);
-                }
-              });
             }
             matchGroups.push(group);
           }
@@ -683,89 +923,61 @@ export default function App() {
     return { newBoard };
   };
 
-  const calculateMatchScore = (count: number) => {
-    if (count === 3) return 10;
-    if (count === 4) return 20;
-    if (count >= 5) return 40;
-    return 0;
+  const calculateMatchScore = (groupSize: number, combo: number) => {
+    let base = GAME_CONFIG.SCORES.MATCH_3;
+    if (groupSize === 4) base = GAME_CONFIG.SCORES.MATCH_4;
+    if (groupSize >= 5) base = GAME_CONFIG.SCORES.MATCH_5_PLUS;
+    
+    // Combo multiplier logic: Score = base * ratio * (multiplier^combo)
+    const multiplier = Math.pow(GAME_CONFIG.SCORES.COMBO_MULTIPLIER, combo - 1);
+    return Math.round(base * groupSize * multiplier);
   };
 
-  // Emitir partículas ao explodir um grupo
-  const spawnParticles = useCallback((group: { r: number; c: number }[], color: string) => {
-    const el = document.getElementById('game-board');
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const cellSize = rect.width / BOARD_SIZE;
 
-    const newParticles: Particle[] = [];
-    const density = group.length >= 6 ? 6 : 4; 
 
-    group.forEach(({ r, c }) => {
-      const cx = rect.left + c * cellSize + cellSize / 2;
-      const cy = rect.top + r * cellSize + cellSize / 2;
-      
-      for (let i = 0; i < density; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 25 + Math.random() * 45;
-        // Efeito "Cores Diferentes" para o Coringa
-        const particleColor = color === '#ffffff' 
-          ? `hsl(${Math.random() * 360}, 100%, 70%)` 
-          : color;
+  const handlePiecePlacement = useCallback(async (piece: Piece, row: number, col: number, pieceIndex: number) => {
+    // Bloqueia imediatamente para evitar cliques simultâneos
+    if (isClearing || !canPlacePiece(piece, row, col, board)) {
+      const ctx = await getAudio();
+      if (ctx) soundError(ctx);
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 250);
+      return;
+    }
 
-        newParticles.push({
-          id: Math.random().toString(36).substr(2, 9),
-          x: cx,
-          y: cy,
-          color: particleColor,
-          dx: Math.cos(angle) * speed,
-          dy: Math.sin(angle) * speed,
-        });
-      }
-    });
-
-    setParticles(prev => [...prev, ...newParticles]);
-    const idsToRemove = new Set(newParticles.map(np => np.id));
-    setTimeout(() => {
-      setParticles(prev => prev.filter(p => !idsToRemove.has(p.id)));
-    }, 800);
-  }, []);
-
-  const PARTICLE_COLOR_MAP: Record<Color, string> = {
-    red: '#fb7185',
-    blue: '#38bdf8',
-    green: '#4ade80',
-    yellow: '#fde047',
-    purple: '#c084fc',
-    orange: '#ea580c',
-    pink: '#ec4899',
-    cyan: '#06b6d4',
-    rainbow: '#ffffff',
-  };
-
-  const handlePiecePlacement = async (piece: Piece, row: number, col: number, pieceIndex: number) => {
-    // Bloqueia IMEDIATAMENTE para evitar cliques simultâneos e corrupção de estado
-    if (isClearing || !canPlacePiece(piece, row, col, board)) return;
     setIsClearing(true);
 
-    const ctx = await getAudio();
-    if (ctx) soundPlace(ctx);
+    // Garante que o AudioContext esteja ativo antes de qualquer som
+    const audioCtx = await getAudio();
+    if (audioCtx) soundPlace(audioCtx);
 
-    // 1. Gera o novo board localmente
+    // 1. Cria o novo board localmente
     const activeBoard = board.map(r => [...r]);
-    piece.shape.forEach(({ x, y, color }) => {
-      activeBoard[row + x][col + y] = { id: Math.random().toString(36).substr(2, 9), color };
+    piece.shape.forEach(({ x, y, color, specialty }) => {
+      activeBoard[row + x][col + y] = {
+        id: Math.random().toString(36).substr(2, 9),
+        color,
+        specialty
+      };
     });
 
-    const remainingPieces = currentPieces.filter((_, i) => i !== pieceIndex);
-    
-    // 2. Atualiza estado imediatamente para feedback visual instantâneo
-    setBoard(() => [...activeBoard]);
-    setCurrentPieces(() => [...remainingPieces]);
-    setSelectedPiece(null);
+    // Remove a peça usando ID (mais seguro que índice)
+    const remainingPieces = currentPieces.filter(p => p.id !== piece.id);
+
+    // 2. Atualiza o estado imediatamente
+    setBoard(activeBoard);
+    setCurrentPieces(remainingPieces);
     setDraggedPiece(null);
 
-    // 3. Função recursiva para processar matches e cascatas
-    const runMatchCycle = (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
+    // Auto-seleciona a próxima peça (melhora o fluxo)
+    if (remainingPieces.length > 0) {
+      setSelectedPiece({ piece: remainingPieces[0], index: 0 });
+    } else {
+      setSelectedPiece(null);
+    }
+
+    // 3. Processa matches e cascatas
+    const runMatchCycle = async (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
       const matchGroups = findMatches(currentBoard);
 
       if (matchGroups.length > 0) {
@@ -774,9 +986,9 @@ export default function App() {
         let iterationScore = 0;
 
         matchGroups.forEach(group => {
-          const groupScore = calculateMatchScore(group.length) * combo;
+          const groupScore = calculateMatchScore(group.length, combo);
           iterationScore += groupScore;
-          
+
           const center = group[Math.floor(group.length / 2)];
           newFloatingPoints.push({
             id: Math.random().toString(36).substr(2, 9),
@@ -784,47 +996,53 @@ export default function App() {
             c: center.c,
             points: groupScore,
           });
+
           group.forEach(({ r, c }) => toFlash.add(`${r}-${c}`));
 
           const firstColor = currentBoard[group[0].r][group[0].c]?.color;
-          if (firstColor) spawnParticles(group, PARTICLE_COLOR_MAP[firstColor]);
+          if (firstColor) {
+            (window as any).triggerPixiExplosion?.(group, firstColor);
+          }
         });
 
         setClearingCells(toFlash);
         setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
         setIsShaking(true);
+
         const shakeDuration = (combo > 1 || matchGroups.flat().length >= 5) ? 550 : 300;
         setTimeout(() => setIsShaking(false), shakeDuration);
+
         const totalMatched = matchGroups.reduce((acc, g) => acc + g.length, 0);
-        let playStandardSound = true;
+
+        // ====================== SOM DOS COMBOS ======================
+        const audioCtx = await getAudio();   // Garante áudio antes de tocar
 
         if (combo > 1) {
           setComboText(`COMBO X${combo}! 🔥`);
-          if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+          if (audioCtx) soundAmazing(audioCtx);
           speak(`Combo ${combo}`);
-        } else if (totalMatched >= 5) { // AMAZING: 5 ou mais blocos
+        } else if (totalMatched >= 5) {
           setComboText('AMAZING! 🔥');
-          if (ctx) { soundAmazing(ctx); playStandardSound = false; }
+          if (audioCtx) soundAmazing(audioCtx);
           speak('Amazing');
-        } else if (totalMatched >= 4) { // GREAT: 4 blocos
+        } else if (totalMatched >= 4) {
           setComboText('GREAT! ⭐');
-          if (ctx) { soundGreat(ctx); playStandardSound = false; }
+          if (audioCtx) soundGreat(audioCtx);
           speak('Great');
         } else {
           setComboText('CLEAR!');
+          if (audioCtx) soundClear(audioCtx);
         }
 
-        if (playStandardSound && ctx) soundClear(ctx);
-        
         setTimeout(() => setComboText(null), 1000);
 
-        // Fase de Gravidade
+        // Fase de Gravidade + Cascata
         setTimeout(() => {
           const tempBoard = currentBoard.map(r => [...r]);
           matchGroups.forEach(group => {
             group.forEach(({ r, c }) => { tempBoard[r][c] = null; });
           });
-          
+
           const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
           const nextScore = currentScore + iterationScore;
 
@@ -845,40 +1063,47 @@ export default function App() {
             setFloatingPoints(prev => prev.filter(p => !idsToClean.has(p.id)));
           }, 800);
 
-          // Recursão para cascatas
           if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
-          cascadeTimeoutRef.current = setTimeout(() => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1), 150);
-        }, 350);
-      } else {
-        // Sem mais matches, finaliza rodada
-        setIsClearing(false);
-        
-        let actualBoard = currentBoard;
-        if (currentLevel > level) {
-          // Refresh no tabuleiro ao subir de nível (limpa 40% das peças para dar alívio/estratégia)
-          actualBoard = currentBoard.map(row => 
-            row.map(cell => (Math.random() > 0.6 ? null : cell))
+          cascadeTimeoutRef.current = setTimeout(
+            () => runMatchCycle(finalBoard, nextScore, nextLevel, combo + 1),
+            GAME_CONFIG.CASCADE_DELAY
           );
+        }, GAME_CONFIG.FLASH_DELAY);
+
+      } else {
+        // Sem mais matches → finaliza rodada
+        setIsClearing(false);
+
+        let actualBoard = currentBoard.map(row => [...row]);
+
+        if (currentLevel > level) {
+          const newColors = getAvailableColors(currentLevel);
+          actualBoard = actualBoard.map(row =>
+            row.map(cell => {
+              if (!cell) return null;
+              if (Math.random() >= GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) return null;
+              return { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] };
+            })
+          );
+
+          const audioCtx = await getAudio();
+          if (audioCtx) soundLevelUp(audioCtx);
         }
 
         let finalPieces: Piece[];
         if (remainingPieces.length === 0) {
-          const totalCells = BOARD_SIZE * BOARD_SIZE;
-          const occupiedCount = actualBoard.flat().filter(c => c).length;
-          const occupancy = occupiedCount / totalCells;
-          
+          const occupancy = actualBoard.flat().filter(c => c).length / (BOARD_SIZE * BOARD_SIZE);
           const simBoard = actualBoard.map(row => [...row]);
-          const pieces: Piece[] = [];
-          
-          const p1Match = occupancy > 0.65;
-          const p2Match = occupancy > 0.8;
-          const p3Match = occupancy > 0.9;
-          const simplify = occupancy > 0.85;
 
-          pieces.push(generatePiece(currentLevel, simBoard, p1Match, simplify));
-          pieces.push(generatePiece(currentLevel, simBoard, p2Match, simplify));
-          pieces.push(generatePiece(currentLevel, simBoard, p3Match, simplify));
+          const p1Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P1;
+          const p2Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P2;
+          const p3Match = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.MATCH_P3;
 
+          const pieces: Piece[] = [
+            generatePiece(currentLevel, simBoard, p1Match),
+            generatePiece(currentLevel, simBoard, p2Match),
+            generatePiece(currentLevel, simBoard, p3Match)
+          ];
           finalPieces = pieces.sort(() => Math.random() - 0.5);
         } else {
           finalPieces = remainingPieces;
@@ -889,19 +1114,21 @@ export default function App() {
         setCurrentPieces(() => [...finalPieces]);
 
         if (currentLevel > level) {
-          if (ctx) soundLevelUp(ctx);
+          const audioCtx = await getAudio();
+          if (audioCtx) soundLevelUp(audioCtx);
+
           setLevel(currentLevel);
           setGameState('levelup');
-          
-          // Troca de fase: Mostra Intersticial já pré-carregado (Sem LAG)
+
           const showPhaseAd = async () => {
             const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
             if (isNative) {
               try {
                 await AdMob.showInterstitial();
-                // Prepara o PRÓXIMO anúncio em background
                 AdMob.prepareInterstitial({ adId: AD_UNITS.INTERSTITIAL, isTesting: false }).catch(() => {});
-              } catch (e) { console.error('Phase Ad fail', e); }
+              } catch (e) {
+                console.error('Phase Ad fail', e);
+              }
             }
           };
           showPhaseAd();
@@ -915,7 +1142,8 @@ export default function App() {
           });
         } else {
           if (checkGameOver(finalPieces, actualBoard)) {
-            if (ctx) soundGameOver(ctx);
+            const audioCtx = await getAudio();
+            if (audioCtx) soundGameOver(audioCtx);
             setGameState('gameover');
             updateStats(currentScore, currentLevel);
           }
@@ -923,10 +1151,71 @@ export default function App() {
       }
     };
 
-    // Delay curto para garantir que a renderização inicial da peça solta apareça
+    // Inicia o ciclo de matches
     setTimeout(() => runMatchCycle(activeBoard, score, level, 1), 50);
-  };
 
+  }, [
+    isClearing,
+    canPlacePiece,
+    board,
+    currentPieces,
+    score,
+    level,
+    checkGameOver,
+    generatePiece,
+    updateStats,
+    getAudio
+  ]);
+
+
+  const performRevive = useCallback(async () => {
+    // 1. Limpa peças aleatoriamente (Libera espaço)
+    const newBoard = board.map(row => row.map(cell => {
+      return (cell && Math.random() < 0.5) ? null : cell;
+    }));
+    
+    // 2. Garante 3 novas peças que caibam (Smarter pieces)
+    const pieces: Piece[] = [
+      generatePiece(level, newBoard, true),
+      generatePiece(level, newBoard, true),
+      generatePiece(level, newBoard, true)
+    ];
+
+    setBoard(newBoard);
+    setCurrentPieces(pieces);
+    setGameState('playing');
+    setRevivedOnce(true);
+    const audioCtx = await getAudio();
+    if (audioCtx) soundLevelUp(audioCtx);
+    speak('Revived! Good luck.');
+  }, [board, level, generatePiece, getAudio]);
+
+  const handleRevive = async () => {
+    const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+    await getAudio();
+
+    if (isNative) {
+      try {
+        await AdMob.prepareRewardVideoAd({ adId: AD_UNITS.REWARDED, isTesting: false });
+        await AdMob.showRewardVideoAd();
+        
+        const listener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
+          listener.remove();
+          performRevive();
+        });
+      } catch (err) {
+        console.error('Revive fail:', err);
+        const audioCtx = await getAudio();
+        if (audioCtx) soundError(audioCtx);
+      }
+    } else {
+      // Browser logic: Fake ad 1.5s
+      setGameState('ad');
+      setTimeout(() => {
+        performRevive();
+      }, 1500);
+    }
+  };
 
   const showAdAndRestart = async () => {
     // ID do usuário (baseado na foto, parece ser App Open)
@@ -958,13 +1247,39 @@ export default function App() {
     }
   };
 
-  const handleCellClick = (row: number, col: number) => {
-    // Impede interação se o tabuleiro estiver processando combos/explosões
+  const handleCellClick = useCallback(async (row: number, col: number) => {
+    if (isClearing || gameState !== 'playing') return;
+    
+    // Resume audio context on interaction
+    const ctx = await getAudio();
+    
+    if (board[row][col]) {
+      if (ctx) soundError(ctx);
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 300);
+      return;
+    }
     if (selectedPiece && !isClearing && gameState === 'playing') {
       const fb = selectedPiece.piece.shape[0];
       handlePiecePlacement(selectedPiece.piece, row - fb.x, col - fb.y, selectedPiece.index);
     }
-  };
+  }, [board, isClearing, gameState, selectedPiece, handlePiecePlacement]);
+
+  const onCellClick = useCallback((r: number, c: number) => {
+    handleCellClick(r, c);
+  }, [handleCellClick]);
+
+  const onCellHover = useCallback((r: number, c: number) => {
+    setHoverCellFast({ r, c });
+  }, [setHoverCellFast]);
+
+  const onCellDrop = useCallback((r: number, c: number) => {
+    setHoverCell(null);
+    if (draggedPiece) {
+      const fb = draggedPiece.piece.shape[0];
+      handlePiecePlacement(draggedPiece.piece, r - fb.x, c - fb.y, draggedPiece.index);
+    }
+  }, [draggedPiece, handlePiecePlacement]);
 
   const handlePieceClick = (piece: Piece, index: number) => {
     setSelectedPiece(selectedPiece?.index === index ? null : { piece, index });
@@ -984,21 +1299,14 @@ export default function App() {
   };
 
   const levelColor = LEVEL_COLORS[(level - 1) % LEVEL_COLORS.length];
-  const levelProgress = Math.max(0, Math.min((score - (level - 1) * 300) / 300, 1));
+  const safeScore = Number(score) || 0;
+  const safeLevel = Number(level) || 1;
+  const levelProgress = Math.max(0, Math.min((safeScore - (safeLevel - 1) * 300) / 300, 1)) || 0;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-between p-4 bg-gradient-to-b from-zinc-900 via-zinc-950 to-black overflow-hidden font-sans pt-8 pb-12">
 
-      {/* Partículas de Explosão */}
-      {particles.map(p => (
-        <motion.div
-          key={p.id}
-          initial={{ x: p.x, y: p.y, scale: 1, opacity: 1 }}
-          animate={{ x: p.x + p.dx, y: p.y + p.dy, scale: 0, opacity: 0 }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-          style={{ position: 'fixed', width: 10, height: 10, borderRadius: '50%', backgroundColor: p.color, pointerEvents: 'none', zIndex: 100, top: 0, left: 0 }}
-        />
-      ))}
+      {/* UI Layers above the board */}
 
       {/* Peça flutuante durante touch drag — pos atualizada direto no DOM (sem re-render) */}
       {draggedPiece && touchFloatPos && (() => {
@@ -1069,9 +1377,11 @@ export default function App() {
 
             <div className="flex flex-col gap-4 w-full max-w-xs">
               <button
-                onClick={() => {
+                onClick={async () => {
+                  await getAudio();
                   const hasProgress = currentPieces.length > 0 && (score > 0 || board.some(row => row.some(cell => cell !== null)));
                   if (hasProgress) {
+                    setIsClearing(false); // Destrava qualquer lock de animação ao voltar
                     setGameState('playing');
                   } else {
                     startNewGame();
@@ -1156,7 +1466,7 @@ export default function App() {
               <h2 className={`text-6xl font-display font-black mb-2 ${levelColor}`}>FASE {level}!</h2>
               <p className="text-zinc-400 text-lg mb-2">Novas peças desbloqueadas!</p>
               <p className="text-zinc-500 text-sm mb-8">
-                {level >= 9 ? '8 cores ativas! 💎' : level >= 7 ? '7 cores ativas 🌸' : level >= 5 ? '6 cores ativas 🟠' : level >= 3 ? '5 cores ativas 🟣' : '4 cores ativas'}
+                {level >= 11 ? '13 cores ativas! 💎' : level >= 9 ? '12 cores ativas 🌈' : level >= 7 ? '10 cores ativas 🌸' : level >= 5 ? '8 cores ativas 🟠' : level >= 3 ? '6 cores ativas 🟣' : '4 cores ativas'}
               </p>
               <button
                 onClick={() => {
@@ -1205,22 +1515,22 @@ export default function App() {
       </AnimatePresence>
 
       {/* ─── HEADER: STATUS CARDS ─── */}
-      <div className="w-full max-w-md flex justify-between items-start mb-6 px-1 pt-4">
+      <div className="w-full max-w-md flex justify-between items-start mb-4 px-1 pt-2">
         {/* Card de FASE (Lado Esquerdo) */}
         <div className="relative group">
           <div className={`absolute -inset-1 bg-gradient-to-r from-fuchsia-600 to-purple-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000`}></div>
-          <div className="relative glass px-5 py-2 rounded-2xl flex flex-col items-start border border-white/10 shadow-2xl min-w-[130px]">
-            <span className={`text-[10px] uppercase tracking-[0.2em] font-black mb-0.5 ${levelColor}`}>FASE ATUAL</span>
+          <div className="relative glass px-3 py-1.5 rounded-xl flex flex-col items-start border border-white/10 shadow-2xl min-w-[110px]">
+            <span className={`text-[9px] uppercase tracking-[0.2em] font-black mb-0.5 ${levelColor}`}>FASE</span>
             <div className="flex items-baseline gap-2">
               <motion.span 
                 key={level}
                 initial={{ scale: 1.2 }}
                 animate={{ scale: 1 }}
-                className="text-3xl font-display font-black text-white leading-none"
+                className="text-2xl font-display font-black text-white leading-none"
               >
                 {level}
               </motion.span>
-              <div className="text-[10px] text-zinc-500 font-bold uppercase">MAX: {stats.maxLevel}</div>
+              <div className="text-[9px] text-zinc-500 font-bold uppercase">MAX: {stats.maxLevel}</div>
             </div>
           </div>
         </div>
@@ -1228,18 +1538,18 @@ export default function App() {
         {/* Card de SCORE (Lado Direito) */}
         <div className="relative group">
           <div className="absolute -inset-1 bg-gradient-to-r from-sky-600 to-violet-600 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
-          <div className="relative glass px-6 py-2 rounded-2xl flex flex-col items-end border border-white/10 shadow-2xl min-w-[130px]">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/80 font-black mb-0.5 text-right w-full">PONTUAÇÃO</span>
+          <div className="relative glass px-4 py-1.5 rounded-xl flex flex-col items-end border border-white/10 shadow-2xl min-w-[110px]">
+            <span className="text-[9px] uppercase tracking-[0.2em] text-sky-400/80 font-black mb-0.5 text-right w-full">SCORE</span>
             <div className="flex flex-col items-end">
               <motion.span 
                 key={score}
                 initial={{ scale: 1.2, color: '#38bdf8' }}
                 animate={{ scale: 1, color: '#ffffff' }}
-                className="text-3xl font-display font-black text-white leading-none"
+                className="text-2xl font-display font-black text-white leading-none"
               >
                 {score}
               </motion.span>
-              <div className="text-[10px] text-zinc-500 font-bold uppercase">BEST: {highScore}</div>
+              <div className="text-[9px] text-zinc-500 font-bold uppercase">BEST: {highScore}</div>
             </div>
           </div>
         </div>
@@ -1286,111 +1596,55 @@ export default function App() {
             x: { duration: 0.2 },
             y: { duration: 0.2 }
           }}
-          className="bg-black/30 backdrop-blur-xl p-2.5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10"
+          className="bg-black/40 p-2.5 rounded-[2rem] shadow-2xl border border-white/10"
         >
           <div
-            className="grid gap-1.5"
+            id="game-board-inner"
+            ref={(el) => {
+              if (el && boardWidth !== el.offsetWidth) {
+                setBoardWidth(el.offsetWidth);
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const r = Math.floor((e.clientY - rect.top) / cellSize);
+              const c = Math.floor((e.clientX - rect.left) / cellSize);
+              if (r >= 0 && r < 8 && c >= 0 && c < 8) setHoverCellFast({ r, c });
+              else setHoverCellFast(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (draggedPiece) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const r = Math.floor((e.clientY - rect.top) / cellSize);
+                const c = Math.floor((e.clientX - rect.left) / cellSize);
+                const fb = draggedPiece.piece.shape[0];
+                handlePiecePlacement(draggedPiece.piece, r - fb.x, c - fb.y, draggedPiece.index);
+              }
+              setDraggedPiece(null);
+              setHoverCellFast(null);
+            }}
+            className="flex items-center justify-center overflow-hidden rounded-[1.8rem] relative"
             style={{
-              gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
-              width: 'min(90vw, 400px)',
-              height: 'min(90vw, 400px)',
+              width: 'min(78vw, 300px)',
+              height: 'min(78vw, 300px)',
             }}
           >
-            {board.map((row, r) =>
-              row.map((cell, c) => (
-                <motion.div
-                  key={`${r}-${c}`}
-                  data-cell="true"
-                  data-r={r}
-                  data-c={c}
-                  className={(() => {
-                    const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    let isGhost = false;
-                    let ghostFits = false;
-                    let ghostBlocked = false;
+            <PixiBoard
+              board={board}
+              containerWidth={Math.min(boardWidth, 300)} // Limita a 300 para manter peças proporcionais
+              hoverCell={hoverCell}
+              draggedPiece={draggedPiece}
+              selectedPiece={selectedPiece}
+              clearingCells={clearingCells}
+              floatingPoints={floatingPoints}
+              onCellClick={onCellClick}
+              onExplosion={(group, color) => {
+                // O PixiBoard já dispara as partículas internamente
+              }}
+            />
 
-                    if (activePiece && hoverCell) {
-                      const firstBlock = activePiece.shape[0]; // Simplificado: assume que o primeiro bloco é o guia
-                      const anchorR = hoverCell.r - firstBlock.x;
-                      const anchorC = hoverCell.c - firstBlock.y;
-                      const ghostBlock = activePiece.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
-                      if (ghostBlock) {
-                        isGhost = true;
-                        ghostFits = canPlacePiece(activePiece, anchorR, anchorC, board);
-                        ghostBlocked = !ghostFits;
-                      }
-                    }
-
-                    return [
-                      'relative rounded-lg aspect-square cursor-pointer transition-all duration-75',
-                      cell ? '' : 'bg-white/5 hover:bg-white/10',
-                      clearingCells.has(`${r}-${c}`) ? 'scale-110 brightness-150 z-10' : '',
-                      ghostFits ? 'ring-2 ring-white/30 z-20' : '',
-                      ghostBlocked ? 'bg-rose-500/20' : '',
-                    ].join(' ');
-                  })()}
-                  onClick={() => handleCellClick(r, c)}
-                  onMouseEnter={() => setHoverCellFast({ r, c })}
-                  onDragOver={(e) => { e.preventDefault(); setHoverCellFast({ r, c }); }}
-                  onDrop={() => {
-                    setHoverCell(null);
-                    if (draggedPiece) {
-                      const fb = draggedPiece.piece.shape[0];
-                      handlePiecePlacement(draggedPiece.piece, r - fb.x, c - fb.y, draggedPiece.index);
-                    }
-                  }}
-                >
-                  {(() => {
-                    const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
-                    if (!activePiece || !hoverCell) return null;
-                    
-                    const firstBlock = activePiece.shape[0];
-                    const anchorR = hoverCell.r - firstBlock.x;
-                    const anchorC = hoverCell.c - firstBlock.y;
-                    const ghostBlock = activePiece.shape.find(({ x, y }) => anchorR + x === r && anchorC + y === c);
-                    if (!ghostBlock) return null;
-                    
-                    const fits = canPlacePiece(activePiece, anchorR, anchorC, board);
-                    return (
-                      <div className={`absolute inset-0 rounded-lg ${COLOR_MAP[ghostBlock.color]} ${fits ? 'opacity-40 animate-pulse' : 'opacity-20 grayscale'} pointer-events-none`} />
-                    );
-                  })()}
-
-                  <AnimatePresence>
-                    {cell && (
-                      <motion.div
-                        key={cell.id}
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0, rotate: 45 }}
-                        className={`absolute inset-0 w-full h-full rounded-lg ${COLOR_MAP[cell.color]}`}
-                      >
-                        {/* Brilho Glossy / Candy Crush Layers */}
-                        <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none rounded-lg z-10" />
-                        <div className="absolute top-[10%] left-[10%] w-[35%] h-[20%] bg-white/40 rounded-full blur-[1px] pointer-events-none z-20" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Floating Points */}
-                  <AnimatePresence>
-                    {floatingPoints.filter(p => p.r === r && p.c === c).map(p => (
-                      <motion.div
-                        key={p.id}
-                        initial={{ opacity: 0, y: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, y: -40, scale: 1.2 }}
-                        exit={{ opacity: 0, y: -60 }}
-                        className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none"
-                      >
-                        <span className="text-white font-display font-black text-lg drop-shadow-md">
-                          +{p.points}
-                        </span>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              ))
-            )}
           </div>
         </motion.div>
 
@@ -1431,6 +1685,17 @@ export default function App() {
                   <RotateCcw className="w-5 h-5" />
                   Jogar de Novo
                 </button>
+
+                {!revivedOnce && (
+                  <button
+                    onClick={handleRevive}
+                    className="bg-gradient-to-r from-amber-400 to-orange-600 hover:from-amber-300 hover:to-orange-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-amber-500/30 border border-white/20"
+                  >
+                    <Play className="w-5 h-5 fill-current" />
+                    Reviver (Ad)
+                  </button>
+                )}
+
                 <button
                   onClick={handleShare}
                   className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/10"
@@ -1445,131 +1710,45 @@ export default function App() {
       </div>
 
       {/* ─── PEÇAS ─── */}
-      <div className="mt-8 flex gap-4 sm:gap-8 justify-center items-center h-32">
-        {currentPieces.map((piece, idx) => {
-          // Memoização manual simples: só calcula se for necessário ou o board mudou
-          // (No React esse componente renderiza muito, então canPlace vira um peso)
-          const canPlace = isClearing ? false : checkGameOver([piece], board) === false;
-          return (
-            <motion.div
-              key={piece.id}
-              draggable
-              style={{ touchAction: 'none' }}
-              whileHover={canPlace ? { scale: 1.08, y: -4 } : {}}
-              whileTap={canPlace ? { scale: 0.95 } : {}}
-              onDragStart={(e) => {
-                // Esconde a imagem padrão do browser — o ghost do board é o feedback visual
-                const ghost = new Image();
-                ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-                e.dataTransfer.setDragImage(ghost, 0, 0);
-                e.dataTransfer.setData('text/plain', '');
-                setDraggedPiece({ piece, index: idx });
-                setSelectedPiece(null);
-              }}
-              onDragEnd={() => { setDraggedPiece(null); setHoverCell(null); }}
-              onTouchStart={(e) => {
-                if (!canPlace) return;
-                const touch = e.touches[0];
-                setDraggedPiece({ piece, index: idx });
-                setSelectedPiece(null);
-                // Inicia já com o offset de -30 para evitar o "pulo" ao começar a mover
-                setTouchFloatPos({ x: touch.clientX, y: touch.clientY - 30 });
-                touchDragRef.current = { piece, index: idx, targetR: -1, targetC: -1 };
-              }}
-              onTouchMove={(e) => {
-                if (!touchDragRef.current) return;
-                e.preventDefault();
-                const touch = e.touches[0];
-                // Atualiza a posição do float DIRETO no DOM — sem setState — zero lag
-                if (touchFloatRef.current) {
-                  const fb = touchDragRef.current!.piece.shape[0];
-                  // Ajuste fino de sensibilidade: centraliza levemente acima do dedo para visibilidade
-                  touchFloatRef.current.style.left = `${touch.clientX - (fb.y * cellSize + cellSize / 2)}px`;
-                  touchFloatRef.current.style.top  = `${touch.clientY - (fb.x * cellSize + cellSize / 2) - 30}px`;
-                }
-                // Detecta a célula baseada na posição DA PEÇA (30px acima), não do dedo
-                const el = document.elementFromPoint(touch.clientX, touch.clientY - 30);
-                const cell = el?.closest('[data-cell]');
-                if (cell) {
-                  const r = parseInt(cell.getAttribute('data-r') || '-1');
-                  const c = parseInt(cell.getAttribute('data-c') || '-1');
-                  touchDragRef.current.targetR = r;
-                  touchDragRef.current.targetC = c;
-                  setHoverCellFast(r >= 0 && c >= 0 ? { r, c } : null);
-                } else {
-                  setHoverCellFast(null);
-                }
-              }}
-              onTouchEnd={() => {
-                const state = touchDragRef.current;
-                if (state && state.targetR >= 0 && state.targetC >= 0) {
-                  const fb = state.piece.shape[0];
-                  handlePiecePlacement(state.piece, state.targetR - fb.x, state.targetC - fb.y, state.index);
-                }
-                touchDragRef.current = null;
-                setDraggedPiece(null);
-                setHoverCell(null);
-                setTouchFloatPos(null);
-              }}
-              onClick={() => handlePieceClick(piece, idx)}
-              animate={{
-                scale: selectedPiece?.index === idx ? 1.1 : 1,
-                y: selectedPiece?.index === idx ? -10 : 0,
-                opacity: gameState !== 'playing' ? 0.5 : canPlace ? 1 : 0.3,
-              }}
-              className={`cursor-grab active:cursor-grabbing transition-all p-2 rounded-xl flex items-center justify-center ${
-                !canPlace ? 'grayscale pointer-events-none' : ''
-              } ${
-                selectedPiece?.index === idx ? 'bg-white/10 ring-2 ring-sky-500' : 'hover:bg-white/5'
-              }`}
-            >
-              <div
-                className="grid gap-1"
-                style={{ gridTemplateColumns: `repeat(5, 1fr)`, gridTemplateRows: `repeat(5, 1fr)` }}
-              >
-                {Array.from({ length: 25 }).map((_, i) => {
-                  const r = Math.floor(i / 5);
-                  const c = i % 5;
-                  
-                  // Centraliza peças no grid 5x5 do preview
-                  const minX = Math.min(...piece.shape.map(b => b.x));
-                  const maxX = Math.max(...piece.shape.map(b => b.x));
-                  const minY = Math.min(...piece.shape.map(b => b.y));
-                  const maxY = Math.max(...piece.shape.map(b => b.y));
-                  const shiftX = Math.floor((5 - (maxX - minX + 1)) / 2) - minX;
-                  const shiftY = Math.floor((5 - (maxY - minY + 1)) / 2) - minY;
-
-                  const block = piece.shape.find(b => b.x + shiftX === r && b.y + shiftY === c);
-                  return (
-                    <div
-                      key={i}
-                      className={`w-3 h-3 sm:w-4 sm:h-4 rounded-sm ${
-                        block ? `${COLOR_MAP[block.color]}` : 'bg-white/5 shadow-inner'
-                      } relative overflow-hidden`}
-                    >
-                      {block && (
-                        <>
-                          <div className="absolute inset-0 bg-gradient-to-tr from-white/30 to-transparent pointer-events-none" />
-                          <div className="absolute top-[10%] left-[10%] w-[40%] h-[25%] bg-white/40 rounded-full blur-[1px] pointer-events-none" />
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          );
-        })}
+      <div className="mt-4 flex gap-3 sm:gap-6 justify-center items-center h-28">
+        {currentPieces.map((piece, idx) => (
+          <PieceItem 
+            key={piece.id} 
+            piece={piece} 
+            idx={idx} 
+            board={board} 
+            isClearing={isClearing}
+            selectedPieceIndex={selectedPiece?.index}
+            gameState={gameState}
+            onPieceClick={handlePieceClick}
+            setDraggedPiece={setDraggedPiece}
+            setSelectedPiece={setSelectedPiece}
+            setTouchFloatPos={setTouchFloatPos}
+            setHoverCellFast={setHoverCellFast}
+            handlePiecePlacement={handlePiecePlacement}
+            canPlacePiece={canPlacePiece}
+            cellSize={cellSize}
+            touchDragRef={touchDragRef}
+            touchFloatRef={touchFloatRef}
+            checkGameOver={checkGameOver}
+          />
+        ))}
       </div>
+      
+
 
       {/* ─── FOOTER CONTROLS ─── */}
-      <div className="mt-auto w-full max-w-md flex justify-around p-6 text-zinc-500">
-        <button onClick={() => setShowInfo(true)} className="hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
-        <button onClick={() => setShowStats(true)} className="hover:text-white transition-colors"><BarChart2 className="w-6 h-6" /></button>
+      <div className="mt-auto w-full max-w-md flex justify-around p-3 text-zinc-500 pb-4">
+        <button onClick={() => setShowInfo(true)} className="hover:text-white transition-colors"><Info className="w-5 h-5" /></button>
+        <button onClick={() => setShowStats(true)} className="hover:text-white transition-colors"><BarChart2 className="w-5 h-5" /></button>
         <button onClick={() => setSoundEnabled(v => !v)} className={`transition-colors ${soundEnabled ? 'text-sky-400' : 'text-zinc-600'}`}>
-          {soundEnabled ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
+          {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
         </button>
-        <button onClick={() => setGameState('menu')} className="hover:text-white transition-colors"><RotateCcw className="w-6 h-6" /></button>
+        <button onClick={() => {
+          setIsClearing(false);
+          if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
+          setGameState('menu');
+        }} className="hover:text-white transition-colors"><RotateCcw className="w-5 h-5" /></button>
       </div>
 
       {/* ─── INFO MODAL ─── */}
@@ -1638,12 +1817,72 @@ export default function App() {
                   <p className="text-2xl font-display font-bold text-white">{stats.totalScore.toLocaleString()}</p>
                 </div>
               </div>
+
+              <div className="mt-8 border-t border-white/5 pt-6">
+                <h4 className="text-xs uppercase tracking-[0.2em] text-zinc-600 font-black mb-4 flex items-center gap-2">
+                  <Trophy className="w-3 h-3" />
+                  Global Top 5
+                </h4>
+                <div className="space-y-3 max-h-[160px] overflow-y-auto pr-1">
+                  {globalTop.length > 0 ? (
+                    globalTop.map((player, i) => (
+                      <div key={i} className="flex justify-between items-center text-sm font-display">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-black ${i === 0 ? 'bg-amber-400 text-black' : 'bg-zinc-800 text-zinc-400'}`}>
+                            {i + 1}
+                          </span>
+                          <span className="text-zinc-300 font-bold uppercase tracking-widest text-[9px]">Player</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-white font-black">{player.high_score.toLocaleString()} <span className="text-sky-400">pts</span></div>
+                          <div className="text-[9px] text-zinc-600 font-bold">FASE {player.max_level}</div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center text-zinc-700 py-4 italic text-xs">Conectando ao ranking...</div>
+                  )}
+                </div>
+              </div>
+
               <button onClick={() => setShowStats(false)} className="w-full mt-8 bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl font-bold transition-colors">Fechar</button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-    </div>
-  );
+        {/* Daily Reward Modal */}
+        <AnimatePresence>
+          {showDailyModal && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md"
+            >
+              <motion.div
+                initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }}
+                className="bg-zinc-900 border border-amber-500/30 p-8 rounded-[2.5rem] max-w-xs w-full text-center shadow-[0_0_50px_rgba(245,158,11,0.2)]"
+              >
+                <div className="w-16 h-16 bg-amber-500/20 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                  <Star className="w-10 h-10 text-amber-500 fill-current" />
+                </div>
+                <h3 className="text-2xl font-display font-black text-white mb-2 uppercase italic tracking-tighter">Bônus Diário!</h3>
+                <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+                  Dia {streak} do seu streak! <br/>
+                  <span className="text-amber-400 font-bold">SORTE ATIVADA:</span> Mais chances de Coringas e Rainbows na primeira partida de hoje!
+                </p>
+                <button
+                  onClick={() => {
+                    setShowDailyModal(false);
+                    setDailyBonusActive(true);
+                  }}
+                  className="w-full bg-gradient-to-r from-amber-400 to-orange-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-orange-600/20 active:scale-95 transition-all"
+                >
+                  COLETAR SORTE
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
 }
