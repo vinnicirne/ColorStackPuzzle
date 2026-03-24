@@ -580,6 +580,32 @@ export default function App() {
     return ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
   };
 
+  const getPowerUpCells = (r: number, c: number, specialty: string, currentBoard: BoardCell[][], currentLevel: number): Set<string> => {
+    const cells = new Set<string>();
+    if (specialty === 'bomb') {
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const tr = r + dr, tc = c + dc;
+          if (tr >= 0 && tr < 8 && tc >= 0 && tc < 8) cells.add(`${tr}-${tc}`);
+        }
+    } else if (specialty === 'color-bomb' || specialty === 'color-clear') {
+      const colorsList = getAvailableColors(currentLevel);
+      const targetColor = currentBoard[r][c]?.color || colorsList[Math.floor(Math.random() * colorsList.length)];
+      currentBoard.flat().forEach((b, idx) => { if (b?.color === targetColor) cells.add(`${Math.floor(idx / 8)}-${idx % 8}`); });
+    } else if (specialty === 'line-clear') {
+      for (let i = 0; i < 8; i++) { cells.add(`${r}-${i}`); cells.add(`${i}-${c}`); }
+    } else if (specialty === 'star') {
+      // Star clears a massive 5x5 cross plus diagonals (Big payoff)
+      for (let i = -2; i <= 2; i++) {
+        for (let j = -2; j <= 2; j++) {
+          const tr = r + i, tc = c + j;
+          if (tr >= 0 && tr < 8 && tc >= 0 && tc < 8) cells.add(`${tr}-${tc}`);
+        }
+      }
+    }
+    return cells;
+  };
+
   // ── Temas por Fase (Cores + Partículas) ──
   const getPhaseTheme = (lvl: number) => {
     if (lvl >= 15) return { bg: 'from-violet-950 via-purple-950 to-black', particleColor: '#c026d3', intensity: 1.8 };
@@ -601,8 +627,9 @@ export default function App() {
       if (Math.random() > chance) return undefined;
       const roll = Math.random();
       if (roll < 0.35) return 'bomb';
-      if (roll < 0.70) return 'color-bomb';
-      return 'line-clear';
+      if (roll < 0.60) return 'color-bomb';
+      if (roll < 0.85) return 'line-clear';
+      return 'star';
     };
 
     if (boardToUpdate && (forceMatch || Math.random() < 0.85)) {
@@ -931,89 +958,120 @@ export default function App() {
 
     // 3. Processa matches e cascatas
     const runMatchCycle = async (currentBoard: BoardCell[][], currentScore: number, currentLevel: number, combo: number) => {
-      const matchGroups = findMatches(currentBoard);
+      try {
+        const matchGroups = findMatches(currentBoard);
 
-      if (matchGroups.length > 0) {
-        setIsClearing(true);
-        const toFlash = new Set<string>();
-        const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
-        let cycleScore = 0;
+        if (matchGroups.length > 0) {
+          setIsClearing(true);
+          const newFloatingPoints: { id: string; r: number; c: number; points: number }[] = [];
+          
+          const allMatchedCells = matchGroups.flat();
+          const cellsToClear = new Set(allMatchedCells.map(c => `${c.r}-${c.c}`));
 
-        matchGroups.forEach(group => {
-          const groupScore = calculateMatchScore(group.length, combo);
-          cycleScore += groupScore;
-          const center = group[Math.floor(group.length / 2)];
-          newFloatingPoints.push({ id: Math.random().toString(36).substr(2, 9), r: center.r, c: center.c, points: groupScore });
-          group.forEach(({ r, c }) => toFlash.add(`${r}-${c}`));
-          const firstCell = currentBoard[group[0].r][group[0].c];
-          if (firstCell) (window as any).triggerPixiExplosion?.(group, firstCell.color);
-        });
+          // Reação em Cadeia de Power-Ups (Foco na Solução sem Gambiarras)
+          const powerUpsQueue = [...allMatchedCells];
+          const processedSpecialties = new Set<string>();
 
-        const allMatchedCells = matchGroups.flat();
-        const powerUpSet = new Set(allMatchedCells.map(c => `${c.r}-${c.c}`));
-
-        // Processa PowerUps
-        allMatchedCells.forEach(cell => {
-          const specialty = currentBoard[cell.r][cell.c]?.specialty;
-          if (!specialty) return;
-          if (specialty === 'bomb') {
-            for (let dr = -1; dr <= 1; dr++)
-              for (let dc = -1; dc <= 1; dc++) {
-                const tr = cell.r + dr, tc = cell.c + dc;
-                if (tr >= 0 && tr < 8 && tc >= 0 && tc < 8) powerUpSet.add(`${tr}-${tc}`);
-              }
-          } else if (specialty === 'color-bomb') {
-            const colorsList = getAvailableColors(currentLevel);
-            const targetColor = colorsList[Math.floor(Math.random() * colorsList.length)];
-            currentBoard.flat().forEach((b, idx) => { if (b?.color === targetColor) powerUpSet.add(`${Math.floor(idx / 8)}-${idx % 8}`); });
-          } else if (specialty === 'line-clear') {
-            for (let i = 0; i < 8; i++) { powerUpSet.add(`${cell.r}-${i}`); powerUpSet.add(`${i}-${cell.c}`); }
+          while (powerUpsQueue.length > 0) {
+            const cell = powerUpsQueue.shift()!;
+            const specialty = currentBoard[cell.r][cell.c]?.specialty;
+            
+            if (specialty && !processedSpecialties.has(`${cell.r}-${cell.c}`)) {
+              processedSpecialties.add(`${cell.r}-${cell.c}`);
+              const extra = getPowerUpCells(cell.r, cell.c, specialty, currentBoard, currentLevel);
+              
+              extra.forEach(id => {
+                if (!cellsToClear.has(id)) {
+                  cellsToClear.add(id);
+                  const [er, ec] = id.split('-').map(Number);
+                  // Se o bloco atingido for outro power-up, coloca na fila para explodir também
+                  if (currentBoard[er][ec]?.specialty) {
+                    powerUpsQueue.push({ r: er, c: ec });
+                  }
+                }
+              });
+            }
           }
-        });
 
-        setClearingCells(powerUpSet);
-        setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
-        setIsShaking(true);
-        setTimeout(() => setIsShaking(false), 350);
+          // Calcula pontuação (contando blocos totais limpos)
+          const totalClearedCount = cellsToClear.size;
+          const cycleScore = calculateMatchScore(totalClearedCount, combo);
+          
+          // Efeitos Visuais
+          matchGroups.forEach(group => {
+            const firstCell = currentBoard[group[0].r][group[0].c];
+            if (firstCell) (window as any).triggerPixiExplosion?.(group, firstCell.color);
+          });
+          
+          const center = allMatchedCells[0] || { r: 4, c: 4 };
+          newFloatingPoints.push({ id: Math.random().toString(36).substr(2, 9), r: center.r, c: center.c, points: cycleScore });
 
-        const audioCtx = await getAudio();
-        if (combo > 1) { setComboText(`COMBO X${combo}! 🔥`); if (audioCtx) soundAmazing(audioCtx); speak(`Combo ${combo}`); }
-        else if (allMatchedCells.length >= 5) { setComboText('AMAZING! 🔥'); if (audioCtx) soundAmazing(audioCtx); speak('Amazing'); }
-        else { setComboText('CLEAR!'); if (audioCtx) soundClear(audioCtx); }
-        setTimeout(() => setComboText(null), 1000);
+          setClearingCells(cellsToClear);
+          setFloatingPoints(prev => [...prev, ...newFloatingPoints]);
+          setIsShaking(true);
+          setTimeout(() => setIsShaking(false), 350);
 
-        setTimeout(() => {
-          const tempBoard = currentBoard.map(r => [...r]);
-          powerUpSet.forEach(s => { const [r, c] = s.split('-').map(Number); tempBoard[r][c] = null; });
-          const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
-          const nextScore = currentScore + cycleScore;
-          if (nextScore > highScore) { setHighScore(nextScore); localStorage.setItem('colorStackHighScore', nextScore.toString()); }
-          const nextLevel = Math.max(currentLevel, Math.floor(nextScore / GAME_CONFIG.LEVEL_SCORE_INTERVAL) + 1);
-          setBoard(() => [...boardAfterGravity]);
-          setScore(nextScore);
-          setClearingCells(new Set());
-          setTimeout(() => setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.some(np => np.id === p.id))), 800);
-          cascadeTimeoutRef.current = setTimeout(() => runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1), GAME_CONFIG.CASCADE_DELAY);
-        }, GAME_CONFIG.FLASH_DELAY);
-      } else {
-        setIsClearing(false);
-        let actualBoard = currentBoard.map(row => [...row]);
-        if (currentLevel > level) {
-          const newColors = getAvailableColors(currentLevel);
-          actualBoard = actualBoard.map(row => row.map(cell => (cell && Math.random() < GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) ? { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] } : null));
           const audioCtx = await getAudio();
-          if (audioCtx) soundLevelUp(audioCtx);
-          setLevel(currentLevel);
-          setGameState('levelup');
+          if (combo > 1) { 
+            setComboText(`COMBO X${combo}! 🔥`); 
+            if (audioCtx) soundAmazing(audioCtx); 
+            speak(`Combo ${combo}`); 
+          } else if (totalClearedCount >= 8) { 
+            setComboText('SUPER CLEAR! ✨'); 
+            if (audioCtx) soundAmazing(audioCtx); 
+          } else { 
+            setComboText('CLEAR!'); 
+            if (audioCtx) soundClear(audioCtx); 
+          }
+          setTimeout(() => setComboText(null), 1000);
+
+          setTimeout(() => {
+            const tempBoard = currentBoard.map(r => [...r]);
+            cellsToClear.forEach(id => { const [r, c] = id.split('-').map(Number); tempBoard[r][c] = null; });
+            const { newBoard: boardAfterGravity } = applyGravity(tempBoard);
+            
+            const nextScore = currentScore + cycleScore;
+            if (nextScore > highScore) { 
+              setHighScore(nextScore); 
+              localStorage.setItem('colorStackHighScore', nextScore.toString()); 
+            }
+            const nextLevel = Math.max(currentLevel, Math.floor(nextScore / GAME_CONFIG.LEVEL_SCORE_INTERVAL) + 1);
+            
+            setBoard(() => [...boardAfterGravity]);
+            setScore(nextScore);
+            setClearingCells(new Set());
+            setTimeout(() => setFloatingPoints(prev => prev.filter(p => !newFloatingPoints.some(np => np.id === p.id))), 800);
+            
+            cascadeTimeoutRef.current = setTimeout(() => runMatchCycle(boardAfterGravity, nextScore, nextLevel, combo + 1), GAME_CONFIG.CASCADE_DELAY);
+          }, GAME_CONFIG.FLASH_DELAY);
+        } else {
+          setIsClearing(false);
+          let actualBoard = currentBoard.map(row => [...row]);
+          if (currentLevel > level) {
+            const newColors = getAvailableColors(currentLevel);
+            actualBoard = actualBoard.map(row => row.map(cell => (cell && Math.random() < GAME_CONFIG.LEVEL_UP_SURVIVAL_RATE) ? { ...cell, color: newColors[Math.floor(Math.random() * newColors.length)] } : null));
+            const audioCtx = await getAudio();
+            if (audioCtx) soundLevelUp(audioCtx);
+            setLevel(currentLevel);
+            setGameState('levelup');
+          }
+          let finalPieces: Piece[];
+          if (remainingPieces.length === 0) {
+            const simBoard = actualBoard.map(row => [...row]);
+            finalPieces = [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
+          } else { 
+            finalPieces = remainingPieces; 
+          }
+          setBoard(() => [...actualBoard]);
+          setCurrentPieces(() => [...finalPieces]);
+          if (checkGameOver(finalPieces, actualBoard)) { 
+            setGameState('gameover'); 
+            updateStats(currentScore, currentLevel); 
+          }
         }
-        let finalPieces: Piece[];
-        if (remainingPieces.length === 0) {
-          const simBoard = actualBoard.map(row => [...row]);
-          finalPieces = [generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false), generatePiece(currentLevel, simBoard, false)];
-        } else { finalPieces = remainingPieces; }
-        setBoard(() => [...actualBoard]);
-        setCurrentPieces(() => [...finalPieces]);
-        if (checkGameOver(finalPieces, actualBoard)) { setGameState('gameover'); updateStats(currentScore, currentLevel); }
+      } catch (err) {
+        console.error('Match Cycle Error:', err);
+        setIsClearing(false);
       }
     };
 

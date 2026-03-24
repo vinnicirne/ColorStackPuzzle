@@ -1,6 +1,6 @@
 /**
- * PixiBoard.tsx - Versão ULTRA-OTIMIZADA PixiJS v8
- * RenderGroup + ParticleContainer nativo + Pooling + Specialty Icons
+ * PixiBoard.tsx - Versão ESTÁVEL e OTIMIZADA PixiJS v8
+ * Uso de Container + RenderGroup para máxima performance sem instabilidade.
  */
 import React, { useCallback, useMemo, useRef, useEffect } from 'react';
 import { Application, extend } from '@pixi/react';
@@ -9,15 +9,12 @@ import {
   Graphics,
   Text,
   TextStyle,
-  ParticleContainer,
-  Particle,
   GraphicsContext,
-  Texture,
 } from 'pixi.js';
 import { BoardCell, Piece, Color } from '../types';
 
-// Registra as extensões do v8
-extend({ Container, Graphics, Text, ParticleContainer, Particle });
+// Registra apenas o essencial
+extend({ Container, Graphics, Text });
 
 declare global {
   namespace JSX {
@@ -25,7 +22,6 @@ declare global {
       pixiContainer: any;
       pixiGraphics: any;
       pixiText: any;
-      pixiParticleContainer: any;
     }
   }
 }
@@ -69,15 +65,26 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
   const height = cellSize * B_SIZE;
 
   const appRef = useRef<any>(null);
-  const explosionPoolRef = useRef<Particle[]>([]);
   const explosionContainerRef = useRef<any>(null);
 
   const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
 
-  // Contexto reutilizável para células (geometria pré-computada)
+  // Estilo de texto pré-calculado
+  const specialtyStyle = useMemo(() => new TextStyle({ 
+    fontSize: Math.floor(cellSize * 0.5), 
+    fontWeight: 'bold', 
+    fill: '#ffffff',
+    dropShadow: { color: '#000000', alpha: 0.4, blur: 4, distance: 2 }
+  }), [cellSize]);
+
+  const floatPointStyle = useMemo(() => new TextStyle({
+    fontFamily: 'system-ui', fontSize: Math.floor(cellSize * 0.55), fontWeight: '950', fill: '#ffffff',
+    dropShadow: { color: '#000000', alpha: 0.6, blur: 10, distance: 4 }
+  }), [cellSize]);
+
   const cellContext = useMemo(() => {
     const ctx = new GraphicsContext();
-    ctx.roundRect(2, 2, cellSize - 4, cellSize - 4, 12);
+    ctx.roundRect(1, 1, cellSize - 2, cellSize - 2, 12);
     return ctx;
   }, [cellSize]);
 
@@ -93,64 +100,48 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
     return { anchorR, anchorC, fits, shape: activePiece.shape };
   }, [activePiece, hoverCell, board]);
 
-  // Trigger de explosão (Object Pooling + v8 Particles)
+  // Explosão (Uso de Graphics + manual ticker para evitar dependência ParticleContainer instável)
   const triggerExplosion = useCallback((group: { r: number; c: number }[], colorHex: number) => {
-    if (!explosionContainerRef.current || group.length === 0) return;
-    const container = explosionContainerRef.current;
-    const centerX = (group[0].c + 0.5) * cellSize;
-    const centerY = (group[0].r + 0.5) * cellSize;
-    const pCount = Math.min(60, 20 + group.length * 5);
-
-    for (let i = 0; i < pCount; i++) {
-      let p = explosionPoolRef.current.pop();
-      if (!p) p = new Particle({ texture: Texture.WHITE });
-      
-      p.x = centerX + (Math.random() - 0.5) * 35;
-      p.y = centerY + (Math.random() - 0.5) * 35;
-      p.tint = colorHex;
-      p.alpha = 1;
-      p.scale = 0.5 + Math.random();
-      
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 150 + Math.random() * 250;
-      (p as any).vx = Math.cos(angle) * speed;
-      (p as any).vy = Math.sin(angle) * speed - 100;
-      
-      container.addParticle(p);
+    if (!appRef.current || group.length === 0) return;
+    const app = appRef.current;
+    
+    // Ponto médio do match
+    const cx = (group.reduce((acc,g)=>acc+g.c,0)/group.length + 0.5) * cellSize;
+    const cy = (group.reduce((acc,g)=>acc+g.r,0)/group.length + 0.5) * cellSize;
+    
+    const count = 15 + group.length * 4;
+    for (let i = 0; i < count; i++) {
+        const p = new Graphics();
+        p.circle(0, 0, 3 + Math.random() * 5).fill({ color: colorHex });
+        p.x = cx; p.y = cy;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 100 + Math.random() * 300;
+        (p as any).vx = Math.cos(angle) * speed;
+        (p as any).vy = Math.sin(angle) * speed - 150;
+        (p as any).life = 1.0;
+        app.stage.addChild(p);
+        
+        const remove = () => { if (p.parent) p.parent.removeChild(p); ticker.remove(move); };
+        const move = (delta: number) => {
+           const dt = delta * 0.016;
+           p.x += (p as any).vx * dt;
+           p.y += (p as any).vy * dt;
+           (p as any).vy += 500 * dt;
+           (p as any).life -= 2.0 * dt;
+           p.alpha = (p as any).life;
+           p.scale.set((p as any).life);
+           if ((p as any).life <= 0) remove();
+        };
+        const ticker = app.ticker;
+        ticker.add(move);
     }
   }, [cellSize]);
-
-  useEffect(() => {
-    const app = appRef.current;
-    if (!app) return;
-    const ticker = app.ticker;
-    const update = (delta: number) => {
-      const container = explosionContainerRef.current;
-      if (!container) return;
-      const particles = container.particles;
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        const dt = delta * 0.016;
-        p.x += (p as any).vx * dt;
-        p.y += (p as any).vy * dt;
-        (p as any).vy += 450 * dt; // Gravidade
-        p.alpha -= 2.0 * dt;
-        p.scale *= 0.96;
-        if (p.alpha <= 0) {
-          container.removeParticle(p);
-          explosionPoolRef.current.push(p);
-        }
-      }
-    };
-    ticker.add(update);
-    return () => ticker.remove(update);
-  }, []);
 
   useEffect(() => {
     (window as any).triggerPixiExplosion = (group: any[], color: Color) => {
       triggerExplosion(group, colorToHex[color] || 0xffffff);
     };
-    return () => delete (window as any).triggerPixiExplosion;
+    return () => { delete (window as any).triggerPixiExplosion; };
   }, [triggerExplosion]);
 
   const drawBoard = useCallback((g: Graphics) => {
@@ -160,18 +151,22 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
         const x = c * cellSize, y = r * cellSize;
         const cell = board[r]?.[c];
         if (cell) {
-          g.context = cellContext;
-          g.fill({ color: colorToHex[cell.color] || 0x888888, alpha: 1 });
-          g.roundRect(x + 4, y + 4, cellSize - 8, cellSize * 0.35, 8).fill({ color: 0xffffff, alpha: 0.28 });
+          const hex = colorToHex[cell.color] || 0x888888;
+          // Base do bloco
+          g.roundRect(x + 2, y + 2, cellSize - 4, cellSize - 4, 12).fill({ color: hex, alpha: 1 });
+          // Highlight (Gloss) - A deformação ocorria por erro no ciclo de fill anterior
+          g.roundRect(x + 4, y + 4, cellSize - 8, cellSize * 0.35, 8).fill({ color: 0xffffff, alpha: 0.22 });
+          
           if (clearingCells.has(`${r}-${c}`)) {
-            g.roundRect(x + 6, y + 6, cellSize - 12, cellSize - 12, 12).stroke({ color: 0xffffff, width: 4, alpha: 1 });
+            g.roundRect(x + 2, y + 2, cellSize - 4, cellSize - 4, 12)
+              .stroke({ color: 0xffffff, width: 4, alpha: 0.9 });
           }
         } else {
           g.roundRect(x + 1, y + 1, cellSize - 2, cellSize - 2, 12).fill({ color: 0xffffff, alpha: 0.06 });
         }
       }
     }
-  }, [board, cellSize, clearingCells, cellContext]);
+  }, [board, cellSize, clearingCells]);
 
   return (
     <Application
@@ -179,16 +174,20 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
       width={width}
       height={height}
       backgroundAlpha={0}
-      antialias={true}
       resolution={1}
-      powerPreference="high-performance"
     >
-      <pixiContainer isRenderGroup={true}>
-        {/* Background Particles Container */}
-        <pixiParticleContainer maxSize={100} dynamicProperties={{ position: true, alpha: true }} />
+      <pixiContainer {...({ isRenderGroup: true } as any)}>
+        {/* Background Ambient Particles (Sinusoidal simples) */}
+        <pixiContainer>
+           {Array.from({ length: 12 }).map((_, i) => (
+             <pixiGraphics key={i} draw={(g: Graphics) => {
+                const off = (i * 0.5);
+                g.clear().circle(Math.random()*width, Math.random()*height + Math.sin(Date.now()/1000 + off)*20, 2).fill({ color: theme.particleColor, alpha: 0.15 });
+             }} />
+           ))}
+        </pixiContainer>
 
-        {/* Board principal */}
-        <pixiGraphics draw={drawBoard} cacheAsTexture={true} />
+        <pixiGraphics draw={drawBoard} {...({ cacheAsTexture: true } as any)} />
 
         {/* Specialty Icons */}
         <pixiContainer>
@@ -199,8 +198,8 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
                 x={(c + 0.5) * cellSize}
                 y={(r + 0.5) * cellSize}
                 anchor={0.5}
-                text={cell.specialty === 'bomb' ? '💣' : cell.specialty === 'color-bomb' ? '🌀' : cell.specialty === 'line-clear' ? '⚡' : '✨'}
-                style={new TextStyle({ fontSize: cellSize * 0.5, fontWeight: 'bold' })}
+                text={cell.specialty === 'bomb' ? '💣' : cell.specialty === 'color-bomb' ? '🌀' : cell.specialty === 'line-clear' ? '⚡' : cell.specialty === 'star' ? '⭐' : '✨'}
+                style={specialtyStyle}
               />
             )
           )))}
@@ -209,7 +208,7 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
         {/* Ghost piece */}
         {ghostData && (
           <pixiGraphics
-            cacheAsTexture={true}
+            {...({ cacheAsTexture: true } as any)}
             draw={(g: Graphics) => {
               g.clear();
               ghostData.shape.forEach(({ x, y, color }) => {
@@ -220,41 +219,32 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
           />
         )}
 
-        {/* Explosões Container */}
-        <pixiParticleContainer
-          ref={explosionContainerRef}
-          maxSize={800}
-          dynamicProperties={{ position: true, alpha: true, scale: true }}
-        />
-
         {/* Floating Points */}
         {floatingPoints.map(p => (
           <pixiText
             key={p.id}
             text={`+${p.points}`}
             x={(p.c + 0.5) * cellSize}
-            y={(p.r + 0.5) * cellSize - 25}
+            y={(p.r + 0.5) * cellSize - 30}
             anchor={0.5}
-            style={new TextStyle({
-              fontFamily: 'system-ui', fontSize: cellSize * 0.5, fontWeight: '900', fill: '#ffffff',
-              dropShadow: { color: '#000000', alpha: 0.6, blur: 8, distance: 4 }
-            })}
+            style={floatPointStyle}
           />
         ))}
 
-        {/* Camada de Interação (Cliques) */}
+        {/* Interação */}
         <pixiContainer>
-          {board.map((row, r) => row.map((_, c) => (
-            <pixiGraphics
-              key={`${r}-${c}`}
-              x={c * cellSize}
-              y={r * cellSize}
-              interactive={true}
-              cursor="pointer"
-              onPointerDown={() => onCellClick(r, c)}
-              draw={(g: Graphics) => { g.clear().rect(0, 0, cellSize, cellSize).fill({ color: 0x000000, alpha: 0.001 }); }}
-            />
-          )))}
+          {Array.from({ length: 64 }).map((_, i) => {
+            const r = Math.floor(i / 8), c = i % 8;
+            return (
+              <pixiGraphics
+                key={i}
+                x={c * cellSize} y={r * cellSize}
+                interactive={true} cursor="pointer"
+                onPointerDown={() => onCellClick(r, c)}
+                draw={(g: Graphics) => { g.clear().rect(0, 0, cellSize, cellSize).fill({ color: 0, alpha: 0.001 }); }}
+              />
+            );
+          })}
         </pixiContainer>
       </pixiContainer>
     </Application>
