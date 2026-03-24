@@ -1,13 +1,12 @@
 /**
- * PixiBoard.tsx - Versão DEFINITIVA e ULTRA-ESTÁVEL para PixiJS v8
- * Resolve: Deformação Visual, Explosões Ausentes e Performance Mobile.
+ * PixiBoard.tsx - Versão ESTÁVEL PixiJS v8
+ * Fix: Explosões re-habilitadas removendo-as do RenderGroup estático.
  */
 import React, { useCallback, useMemo, useRef, useEffect } from 'react';
 import { Application, extend } from '@pixi/react';
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import { BoardCell, Piece, Color } from '../types';
 
-// Essencial para renderização no v8
 extend({ Container, Graphics, Text });
 
 declare global {
@@ -60,14 +59,13 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
   const height = cellSize * B_SIZE;
 
   const appRef = useRef<any>(null);
-  const explosionLayerRef = useRef<any>(null); // Layer dedicada para evitar conflitos de RenderGroup
+  const explosionContainerRef = useRef<any>(null);
 
   const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
 
-  // Memoizing Styles para evitar re-cálculos pesados
   const specialtyStyle = useMemo(() => new TextStyle({
     fontFamily: 'system-ui', fontSize: Math.floor(cellSize * 0.52), fontWeight: 'bold', fill: '#ffffff',
-    dropShadow: { color: '#000000', alpha: 0.5, blur: 4, distance: 1 }
+    dropShadow: { color: '#000000', alpha: 0.5, blur: 5, distance: 1 }
   }), [cellSize]);
 
   const floatPointStyle = useMemo(() => new TextStyle({
@@ -87,43 +85,42 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
     return { anchorR, anchorC, fits, shape: activePiece.shape };
   }, [activePiece, hoverCell, board]);
 
-  // EXPLOSÃO RE-HABILITADA (Ticker Robusto)
   const triggerExplosion = useCallback((group: { r: number; c: number }[], colorHex: number) => {
-    const parent = explosionLayerRef.current;
     const app = appRef.current;
-    if (!parent || !app || group.length === 0) return;
+    const container = explosionContainerRef.current;
+    if (!app || !container || group.length === 0) return;
 
     const centerX = (group[0].c + 0.5) * cellSize;
     const centerY = (group[0].r + 0.5) * cellSize;
-    const count = 20 + group.length * 4;
+    const count = 25;
 
     for (let i = 0; i < count; i++) {
-      const p = new Graphics();
-      p.circle(0, 0, 3 + Math.random() * 5).fill({ color: colorHex });
-      p.x = centerX + (Math.random() - 0.5) * 20;
-      p.y = centerY + (Math.random() - 0.5) * 20;
+        const p = new Graphics();
+        p.circle(0, 0, 3 + Math.random() * 5).fill({ color: colorHex });
+        p.x = centerX; p.y = centerY;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 100 + Math.random() * 300;
+        const vx = Math.cos(angle) * speed;
+        let vy = Math.sin(angle) * speed - 150;
+        let life = 1.0;
 
-      const vx = (Math.random() - 0.5) * 450;
-      let vy = (Math.random() - 0.5) * 350 - 150;
-      let life = 1.0;
+        container.addChild(p);
 
-      parent.addChild(p);
+        const update = (time: any) => {
+            const dt = time.deltaTime / 60; 
+            p.x += vx * dt;
+            p.y += vy * dt;
+            vy += 800 * dt;
+            life -= 2.2 * dt;
+            p.alpha = life;
+            p.scale.set(life);
 
-      const update = (delta: number) => {
-        const dt = delta / 60; // Normaliza para 60fps
-        p.x += vx * dt;
-        p.y += vy * dt;
-        vy += 800 * dt;
-        life -= 2.5 * dt;
-        p.alpha = life;
-        p.scale.set(life);
-
-        if (life <= 0) {
-          app.ticker.remove(update);
-          if (p.parent) p.parent.removeChild(p);
-        }
-      };
-      app.ticker.add(update);
+            if (life <= 0) {
+                app.ticker.remove(update);
+                if (p.parent) p.parent.removeChild(p);
+            }
+        };
+        app.ticker.add(update);
     }
   }, [cellSize]);
 
@@ -142,11 +139,8 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
         const cell = board[r]?.[c];
         if (cell) {
           const hex = colorToHex[cell.color] || 0x888888;
-          // Desenha sem stroke base para evitar deformação de borda
           g.roundRect(x + 2, y + 2, cellSize - 4, cellSize - 4, 12).fill({ color: hex });
-          // Gloss Layer
           g.roundRect(x + 5, y + 4, cellSize - 10, cellSize * 0.35, 8).fill({ color: 0xffffff, alpha: 0.22 });
-          
           if (clearingCells.has(`${r}-${c}`)) {
              g.roundRect(x + 2, y + 2, cellSize - 4, cellSize - 4, 12).stroke({ color: 0xffffff, width: 4.5, alpha: 0.9 });
           }
@@ -164,12 +158,10 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
       height={height}
       backgroundAlpha={0}
       antialias={true}
-      resolution={1} // Reset para 1 evita o zoom 2x indesejado no mobile/browser
-      powerPreference="high-performance"
+      resolution={1}
     >
       <pixiContainer {...({ isRenderGroup: true } as any)}>
         <pixiGraphics draw={drawBoard} />
-        
         {ghostData && (
           <pixiGraphics
             draw={(g: Graphics) => {
@@ -181,7 +173,6 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
             }}
           />
         )}
-
         <pixiContainer>
           {board.map((row, r) => row.map((cell, c) => (
             cell?.specialty && (
@@ -196,7 +187,6 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
             )
           )))}
         </pixiContainer>
-
         {floatingPoints.map((pt) => (
           <pixiText
             key={pt.id}
@@ -207,7 +197,6 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
             style={floatPointStyle}
           />
         ))}
-
         {hintPosition && (
           <pixiGraphics
             draw={(g: Graphics) => {
@@ -215,11 +204,12 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
             }}
           />
         )}
+      </pixiContainer>
 
-        {/* Camada para explosões fora do RenderGroup estático para evitar glitches */}
-        <pixiContainer ref={explosionLayerRef} />
+      {/* Camada de Explosão fora do RenderGroup estático */}
+      <pixiContainer ref={explosionContainerRef} />
 
-        <pixiContainer>
+      <pixiContainer>
           {Array.from({ length: 64 }).map((_, i) => {
             const r = Math.floor(i / 8), c = i % 8;
             return (
@@ -232,7 +222,6 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
               />
             );
           })}
-        </pixiContainer>
       </pixiContainer>
     </Application>
   );
