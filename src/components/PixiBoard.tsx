@@ -36,6 +36,7 @@ interface PixiBoardProps {
   selectedPiece: { piece: Piece; index: number } | null;
   clearingCells: Set<string>;
   floatingPoints: { id: string; r: number; c: number; points: number }[];
+  hintPosition: { r: number; c: number; pieceIndex: number } | null; // ← Nova prop
   onCellClick: (r: number, c: number) => void;
   onExplosion?: (group: { r: number; c: number }[], color: string) => void;
 }
@@ -57,6 +58,7 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
   selectedPiece,
   clearingCells,
   floatingPoints,
+  hintPosition,
   onCellClick,
   onExplosion,
 }) => {
@@ -191,6 +193,25 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
               />
             );
           })}
+        </pixiContainer>
+      )}
+
+      {/* Hint Visual Layer */}
+      {hintPosition && (
+        <pixiContainer alpha={0.7}>
+          <pixiGraphics
+            draw={(g: Graphics) => {
+              g.clear()
+               .roundRect(
+                 hintPosition.c * cellSize + 4,
+                 hintPosition.r * cellSize + 4,
+                 cellSize - 8,
+                 cellSize - 8,
+                 14
+               )
+               .stroke({ color: 0xffeb3b, width: 6, alpha: 1 }); // Amarelo brilhante
+            }}
+          />
         </pixiContainer>
       )}
 

@@ -17,8 +17,8 @@ import PixiBoard from './components/PixiBoard';
 const GAME_CONFIG = {
   BOARD_SIZE: 8,
   LEVEL_SCORE_INTERVAL: 480,       // Intervalo para subir de fase (Mais desafiador)
-  JOKER_CHANCE: 0.08,
-  RAINBOW_CHANCE: 0.06,
+  JOKER_CHANCE: 0.11,
+  RAINBOW_CHANCE: 0.09,
   GRAVITY_DELAY: 350,
   CASCADE_DELAY: 150,
   FLASH_DELAY: 350,
@@ -431,6 +431,7 @@ export default function App() {
   const [showDailyModal, setShowDailyModal] = useState(false);
   const [streak, setStreak] = useState(0);
   const [dailyBonusActive, setDailyBonusActive] = useState(false);
+  const [hintPosition, setHintPosition] = useState<{ r: number; c: number; pieceIndex: number } | null>(null);
 
 
 
@@ -490,6 +491,13 @@ export default function App() {
   // ── Nível: threshold cresce com o nível ──
   const levelThreshold = (lvl: number) => lvl * GAME_CONFIG.LEVEL_SCORE_INTERVAL;
 
+  // ── Formas disponíveis por nível ──
+  const getAvailableShapes = (lvl: number) => {
+    if (lvl >= 5) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1], ...SHAPES_BY_LEVEL[2]];
+    if (lvl >= 3) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1]];
+    return SHAPES_BY_LEVEL[0];
+  };
+
   // ── Cores disponíveis por nível ──
   const getAvailableColors = (lvl: number): Color[] => {
     if (lvl >= 11) return ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'lime', 'emerald', 'amber', 'fuchsia', 'indigo'];
@@ -500,105 +508,90 @@ export default function App() {
     return ['red', 'blue', 'green', 'yellow'];
   };
 
-  // ── Formas disponíveis por nível ──
-  const getAvailableShapes = (lvl: number) => {
-    if (lvl >= 5) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1], ...SHAPES_BY_LEVEL[2]];
-    if (lvl >= 3) return [...SHAPES_BY_LEVEL[0], ...SHAPES_BY_LEVEL[1]];
-    return SHAPES_BY_LEVEL[0];
+  // ── Cores de fundo dinâmicas por nível ──
+  const getBoardBackgroundColor = (lvl: number): string => {
+    if (lvl >= 12) return 'from-purple-950 via-indigo-950 to-black';
+    if (lvl >= 9)  return 'from-rose-950 via-purple-950 to-black';
+    if (lvl >= 6)  return 'from-amber-950 via-orange-950 to-black';
+    if (lvl >= 4)  return 'from-emerald-950 via-cyan-950 to-black';
+    return 'from-zinc-950 via-slate-950 to-black';
   };
 
-  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null, forceMatch: boolean = false, simplifyShapes: boolean = false): Piece => {
+  const generatePiece = useCallback((lvl: number = 1, boardToUpdate: BoardCell[][] | null = null): Piece => {
     const shapes = getAvailableShapes(lvl);
     const colors = getAvailableColors(lvl);
-    const occupancy = boardToUpdate ? boardToUpdate.flat().filter(x => x).length / 64 : 0;
-    const isJokerEra = occupancy > GAME_CONFIG.OCCUPANCY_STRATEGIES.JOKER_ERA;
+    const occupancy = boardToUpdate ? boardToUpdate.flat().filter(c => c).length / 64 : 0;
+    const isJokerEra = lvl >= 7 || occupancy > 0.78;
 
-    // Otimização Sênior: Função pura, sem mutação do board de entrada
-    const generateBlock = (c: Color): { x: number; y: number; color: Color; specialty?: 'color-clear' } => {
-      let jokerProb = GAME_CONFIG.JOKER_CHANCE;
-      if (dailyBonusActive) jokerProb *= 2;
-      
-      const isColorJoker = Math.random() < jokerProb;
-      return { x: 0, y: 0, color: c, specialty: isColorJoker ? 'color-clear' : undefined };
-    };
-    
-    // 1. TENTATIVA DE GERAÇÃO INTELIGENTE (RESERVA DE ESPAÇO)
+    // ── FORÇA MATCH GARANTIDO (Misericórdia) ──
     if (boardToUpdate) {
       const shuffledShapes = [...shapes].sort(() => Math.random() - 0.5);
-      let firstSpotFound: { p: Piece; r: number; c: number } | null = null;
 
       for (const shapeTemplate of shuffledShapes) {
         const maxX = Math.max(...shapeTemplate.map(s => s[0]));
         const maxY = Math.max(...shapeTemplate.map(s => s[1]));
-        for (let r = 0; r <= BOARD_SIZE - maxX - 1; r++) {
-          for (let c = 0; c <= BOARD_SIZE - maxY - 1; c++) {
-            if (shapeTemplate.every(([sx, sy]) => {
-              const tr = r + sx; const tc = c + sy;
-              return tr >= 0 && tr < BOARD_SIZE && tc >= 0 && tc < BOARD_SIZE && boardToUpdate[tr][tc] === null;
-            })) {
-              const assigned: { x: number; y: number; color: Color; specialty?: 'color-clear' }[] = [];
-              let bestMatchedColor: Color | null = null;
-              
-              if (forceMatch) {
-                for (const tCol of colors) {
-                  const hasNeighbor = shapeTemplate.some(([sx, sy]) => {
-                    const nr = r + sx; const nc = c + sy;
-                    return [{r:nr-1,c:nc},{r:nr+1,c:nc},{r:nr,c:nc-1},{r:nr,c:nc+1}].some(n => 
-                      n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && 
-                      boardToUpdate[n.r][n.c]?.color === tCol
-                    );
-                  });
-                  if (hasNeighbor) { bestMatchedColor = tCol; break; }
-                }
-              }
 
-              const fCol = (forceMatch && isJokerEra && Math.random() > 0.7) 
-                ? 'rainbow' 
-                : (bestMatchedColor || colors[Math.floor(Math.random() * colors.length)]);
+        for (let r = 0; r <= 8 - maxX - 1; r++) {
+          for (let c = 0; c <= 8 - maxY - 1; c++) {
+            // Verifica se cabe
+            if (!shapeTemplate.every(([sx, sy]) => {
+              const tr = r + sx, tc = c + sy;
+              return tr >= 0 && tr < 8 && tc >= 0 && tc < 8 && boardToUpdate[tr][tc] === null;
+            })) continue;
+
+            // Simula o placement e verifica se gera match
+            const simBoard = boardToUpdate.map(row => [...row]);
+            shapeTemplate.forEach(([sx, sy]) => {
+              const color = colors[Math.floor(Math.random() * colors.length)];
+              simBoard[r + sx][c + sy] = { id: 'sim', color: color as Color, specialty: undefined };
+            });
+
+            const matches = findMatches(simBoard);
+            if (matches.length > 0) {
+              // Gerou match → usa essa peça
+              const assigned: any[] = [];
+              const isRainbow = isJokerEra && Math.random() < 0.28;
 
               shapeTemplate.forEach(([sx, sy]) => {
-                let bColor = colors[Math.floor(Math.random() * colors.length)];
-                const isBridge = [{r:r+sx-1,c:c+sy},{r:r+sx+1,c:c+sy},{r:r+sx,c:c+sy-1},{r:r+sx,c:c+sy+1}]
-                  .some(n => n.r>=0 && n.r<BOARD_SIZE && n.c>=0 && n.c<BOARD_SIZE && boardToUpdate[n.r][n.c]?.color === fCol);
-                
-                if (isBridge || fCol === 'rainbow') bColor = fCol as Color;
-                const blk = generateBlock(bColor);
-                assigned.push({ x: sx, y: sy, color: blk.color, specialty: blk.specialty });
+                const color = isRainbow ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)];
+                assigned.push({
+                  x: sx,
+                  y: sy,
+                  color: color as Color,
+                  specialty: Math.random() < 0.22 ? 'color-clear' : undefined
+                });
               });
-              
-              return { id: Math.random().toString(36).substr(2, 9), shape: assigned, position: { r, c } };
-            }
-          }
-        }
-      }
 
-      // 3. ABSOLUTE PITY (1x1 INTELIGENTE / CORINGA)
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-          if (boardToUpdate[r][c] === null) {
-            const neighs = [{r:r-1,c:c},{r:r+1,c:c},{r:r,c:c-1},{r:r,c:c+1}]
-              .filter(n=>n.r>=0&&n.r<BOARD_SIZE&&n.c>=0&&n.c<BOARD_SIZE&&boardToUpdate[n.r][n.c]);
-            
-            let jokerProb = 0.25; // 1 - 0.75
-            if (dailyBonusActive) jokerProb = 0.5;
-            
-            const isJoker = isJokerEra && Math.random() < jokerProb;
-            const tColor = isJoker ? 'rainbow' : (neighs.length > 0 ? boardToUpdate[neighs[0].r][neighs[0].c]!.color : colors[Math.floor(Math.random() * colors.length)]);
-            return { id: isJoker ? 'joker-' + Math.random().toString(36).substr(2, 4) : 'pity-fix', shape: [{ x: 0, y: 0, color: tColor as Color }], position: { r, c } };
+              return {
+                id: Math.random().toString(36).substr(2, 9),
+                shape: assigned
+              };
+            }
           }
         }
       }
     }
 
+    // ── PITY FINAL (caso não encontre) ──
     const shapeTemplate = shapes[Math.floor(Math.random() * shapes.length)];
-    const assigned: { x: number; y: number; color: Color; specialty?: 'color-clear' }[] = [];
-    shapeTemplate.forEach(([x, y]) => {
-      const blk = generateBlock(colors[Math.floor(Math.random() * colors.length)]);
-      assigned.push({ x, y, color: blk.color, specialty: blk.specialty });
-    });
-    return { id: Math.random().toString(36).substr(2, 9), shape: assigned };
+    const assigned: any[] = [];
+    const isRainbow = isJokerEra && Math.random() < 0.40; // mais coringa em fase alta
 
-  }, [dailyBonusActive]);
+    shapeTemplate.forEach(([x, y]) => {
+      const color = isRainbow ? 'rainbow' : colors[Math.floor(Math.random() * colors.length)];
+      assigned.push({
+        x,
+        y,
+        color: color as Color,
+        specialty: Math.random() < 0.28 ? 'color-clear' : undefined
+      });
+    });
+
+    return {
+      id: Math.random().toString(36).substr(2, 9),
+      shape: assigned
+    };
+  }, []);
 
   const startNewGame = useCallback(() => {
     if (cascadeTimeoutRef.current) clearTimeout(cascadeTimeoutRef.current);
@@ -1325,6 +1318,31 @@ export default function App() {
     setSelectedPiece(selectedPiece?.index === index ? null : { piece, index });
   };
 
+  const showHint = useCallback(() => {
+    if (isClearing || gameState !== 'playing' || currentPieces.length === 0) return;
+
+    for (let i = 0; i < currentPieces.length; i++) {
+      const piece = currentPieces[i];
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          if (canPlacePiece(piece, r, c, board)) {
+            // Simula o match
+            const simBoard = board.map(row => [...row]);
+            piece.shape.forEach(({ x, y, color }) => {
+              simBoard[r + x][c + y] = { id: 'hint', color: color as Color, specialty: undefined };
+            });
+            if (findMatches(simBoard).length > 0) {
+              setHintPosition({ r, c, pieceIndex: i });
+              // Remove o hint automaticamente depois de 4 segundos
+              setTimeout(() => setHintPosition(null), 4000);
+              return;
+            }
+          }
+        }
+      }
+    }
+  }, [board, currentPieces, canPlacePiece, isClearing, gameState]);
+
   const handleShare = async () => {
     try {
       await Share.share({
@@ -1636,7 +1654,7 @@ export default function App() {
             x: { duration: 0.2 },
             y: { duration: 0.2 }
           }}
-          className="bg-black/40 p-2.5 rounded-[2rem] shadow-2xl border border-white/10"
+          className={`bg-gradient-to-b ${getBoardBackgroundColor(level)} p-3 rounded-[2rem] shadow-2xl border border-white/10`}
         >
           <div
             id="game-board-inner"
@@ -1679,6 +1697,7 @@ export default function App() {
               selectedPiece={selectedPiece}
               clearingCells={clearingCells}
               floatingPoints={floatingPoints}
+              hintPosition={hintPosition}
               onCellClick={onCellClick}
               onExplosion={(group, color) => {
                 // O PixiBoard já dispara as partículas internamente
@@ -1781,6 +1800,16 @@ export default function App() {
       <div className="mt-auto w-full max-w-md flex justify-around p-3 text-zinc-500 pb-4">
         <button onClick={() => setShowInfo(true)} className="hover:text-white transition-colors"><Info className="w-5 h-5" /></button>
         <button onClick={() => setShowStats(true)} className="hover:text-white transition-colors"><BarChart2 className="w-5 h-5" /></button>
+        
+        {/* Botão de Hint */}
+        <button 
+          onClick={showHint}
+          className="hover:text-amber-400 transition-colors flex items-center gap-1"
+          title="Mostrar dica"
+        >
+          <span className="text-amber-400">💡</span>
+        </button>
+
         <button onClick={() => setSoundEnabled(v => !v)} className={`transition-colors ${soundEnabled ? 'text-sky-400' : 'text-zinc-600'}`}>
           {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
         </button>
