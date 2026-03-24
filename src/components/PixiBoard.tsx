@@ -1,23 +1,15 @@
 /**
- * PixiBoard.tsx - Tabuleiro com PixiJS v8 + Partículas Explosivas
- * Compatível com @pixi/react v8
+ * PixiBoard.tsx - Tabuleiro com PixiJS v8 + Partículas Explosivas (ESTÁVEL)
+ * Versão corrigida para compatibilidade total com PixiJS v8
  */
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useEffect } from 'react';
 import { Application, extend } from '@pixi/react';
-import { 
-  Container, 
-  Graphics, 
-  Text, 
-  TextStyle, 
-  Texture
-} from 'pixi.js';
-import { Emitter, upgradeConfig } from '@pixi/particle-emitter';
+import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import { BoardCell, Piece, Color } from '../types';
 
-// Registra os componentes do PixiJS no ecossistema React do @pixi/react v8
+// Registra apenas o que vamos usar no v8
 extend({ Container, Graphics, Text });
 
-// Atalhos para os tipos intrínsecos do @pixi/react v8
 declare global {
   namespace JSX {
     interface IntrinsicElements {
@@ -37,7 +29,7 @@ interface PixiBoardProps {
   clearingCells: Set<string>;
   floatingPoints: { id: string; r: number; c: number; points: number }[];
   hintPosition: { r: number; c: number; pieceIndex: number } | null;
-  theme: { particleColor: string; intensity: number }; // ← NOVO
+  theme: { particleColor: string; intensity: number };
   onCellClick: (r: number, c: number) => void;
   onExplosion?: (group: { r: number; c: number }[], color: string) => void;
 }
@@ -48,8 +40,6 @@ const colorToHex: Record<Color, number> = {
   lime: 0xb3ff4d, emerald: 0x4dff99, amber: 0xffb34d, fuchsia: 0xff4dff,
   indigo: 0x6666ff, rainbow: 0xffffff,
 };
-
-const toHexStr = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 
 const PixiBoard: React.FC<PixiBoardProps> = ({
   board,
@@ -62,7 +52,6 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
   hintPosition,
   theme,
   onCellClick,
-  onExplosion,
 }) => {
   const B_SIZE = 8;
   const cellSize = Math.floor(containerWidth / B_SIZE);
@@ -70,21 +59,20 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
   const height = cellSize * B_SIZE;
 
   const appRef = useRef<any>(null);
-  const emitterRef = useRef<Emitter | null>(null);
 
   const activePiece = draggedPiece?.piece ?? selectedPiece?.piece ?? null;
 
-  // Background Particles (Ambiente)
+  // Background Particles (Ambiente Procedural)
   const bgParticles = useMemo(() => {
     return Array.from({ length: Math.floor(15 * theme.intensity) }).map((_, i) => ({
       id: i,
       x: Math.random() * width,
       y: Math.random() * height,
-      size: 1 + Math.random() * 3,
-      alpha: 0.1 + Math.random() * 0.3,
-      speed: 0.2 + Math.random() * 0.5
+      size: 1.5 + Math.random() * 2.5,
+      alpha: 0.1 + Math.random() * 0.25,
+      offset: Math.random() * Math.PI * 2,
     }));
-  }, [theme, width, height]);
+  }, [theme.intensity, width, height]);
 
   const ghostData = useMemo(() => {
     if (!activePiece || !hoverCell) return null;
@@ -101,40 +89,63 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
     return { anchorR, anchorC, fits, shape: activePiece.shape };
   }, [activePiece, hoverCell, board]);
 
+  // Explosão Manual (Pixi v8 estável sem dependências problemáticas)
   const triggerExplosion = useCallback((group: { r: number; c: number }[], colorHex: number) => {
     if (!appRef.current || group.length === 0) return;
+
+    const app = appRef.current;
     const centerX = (group[0].c + 0.5) * cellSize;
     const centerY = (group[0].r + 0.5) * cellSize;
-    if (emitterRef.current) emitterRef.current.destroy();
 
-    const emitterConfig = upgradeConfig({
-      alpha: { start: 1, end: 0 },
-      scale: { start: 0.8, end: 0.05, minimumScaleMultiplier: 0.5 },
-      color: { start: toHexStr(colorHex), end: '#ffffff' },
-      speed: { start: 250, end: 50 },
-      acceleration: { x: 0, y: 150 },
-      startRotation: { min: 0, max: 360 },
-      rotationSpeed: { min: -150, max: 150 },
-      lifetime: { min: 0.35, max: 0.75 },
-      frequency: 0.015,
-      emitterLifetime: 0.3,
-      maxParticles: 100,
-      pos: { x: centerX, y: centerY },
-      addAtBack: false,
-      spawnType: 'circle',
-      spawnCircle: { x: 0, y: 0, r: 20 }
-    }, [Texture.WHITE]);
+    const particleContainer = new Container();
+    app.stage.addChild(particleContainer);
 
-    emitterRef.current = new Emitter(appRef.current.stage, emitterConfig);
-    emitterRef.current.emit = true;
-    setTimeout(() => { if (emitterRef.current) { emitterRef.current.destroy(); emitterRef.current = null; } }, 1000);
+    const particleCount = Math.min(40, 15 + group.length * 3);
+
+    for (let i = 0; i < particleCount; i++) {
+      const g = new Graphics();
+      const size = 3 + Math.random() * 5;
+      g.circle(0, 0, size).fill({ color: colorHex, alpha: 0.9 });
+
+      g.x = centerX + (Math.random() - 0.5) * 30;
+      g.y = centerY + (Math.random() - 0.5) * 30;
+
+      let vx = (Math.random() - 0.5) * 400;
+      let vy = (Math.random() - 0.5) * 400 - 100;
+
+      particleContainer.addChild(g);
+
+      const startTime = Date.now();
+      const lifetime = 400 + Math.random() * 300;
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = elapsed / lifetime;
+
+        if (progress > 1) {
+          particleContainer.removeChild(g);
+          if (particleContainer.children.length === 0) app.stage.removeChild(particleContainer);
+          return;
+        }
+
+        g.x += vx * 0.016;
+        g.y += vy * 0.016;
+        vy += 300 * 0.016; // Gravidade fake
+
+        g.alpha = 1 - progress;
+        g.scale.set(1 - progress * 0.8);
+        requestAnimationFrame(animate);
+      };
+      animate();
+    }
   }, [cellSize]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     (window as any).triggerPixiExplosion = (group: any[], color: Color) => {
       const hex = colorToHex[color] || 0xffffff;
       triggerExplosion(group, hex);
     };
+    return () => { delete (window as any).triggerPixiExplosion; };
   }, [triggerExplosion]);
 
   const drawBoard = useCallback((g: Graphics) => {
@@ -168,13 +179,12 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
       resolution={1}
       hello={false}
     >
-      {/* Background Ambience Particles */}
       <pixiContainer>
         {bgParticles.map(p => (
           <pixiGraphics
             key={p.id}
             draw={(g: Graphics) => {
-              g.clear().circle(p.x, p.y, p.size).fill({ color: theme.particleColor, alpha: p.alpha });
+              g.clear().circle(p.x, p.y + Math.sin(Date.now() / 900 + p.offset) * 10, p.size).fill({ color: theme.particleColor, alpha: p.alpha });
             }}
           />
         ))}
@@ -182,7 +192,7 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
 
       <pixiGraphics draw={drawBoard} />
 
-      {/* Specialties Visual Indicators (Icons) */}
+      {/* Specialty Icons */}
       <pixiContainer>
         {board.map((row, r) => row.map((cell, c) => (
           cell?.specialty && (
@@ -190,7 +200,7 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
               key={`${r}-${c}`}
               x={(c + 0.5) * cellSize}
               y={(r + 0.5) * cellSize}
-              ref={(node: Text) => {
+              ref={(node: any) => {
                 if (node) {
                   node.anchor.set(0.5);
                   node.text = cell.specialty === 'bomb' ? '💣' : 
@@ -211,44 +221,35 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
             const gx = (ghostData.anchorC + block.y) * cellSize;
             const gy = (ghostData.anchorR + block.x) * cellSize;
             return (
-              <pixiGraphics
-                key={i}
-                draw={(g: Graphics) => {
-                  g.clear().roundRect(gx + 2, gy + 2, cellSize - 4, cellSize - 4, 12).fill({ color: colorToHex[block.color] || 0xffffff, alpha: 0.75 });
-                }}
-              />
+              <pixiGraphics key={i} draw={(g: Graphics) => {
+                g.clear().roundRect(gx + 2, gy + 2, cellSize - 4, cellSize - 4, 12).fill({ color: colorToHex[block.color], alpha: 0.75 });
+              }} />
             );
           })}
         </pixiContainer>
       )}
 
       {hintPosition && (
-        <pixiContainer alpha={0.7}>
-          <pixiGraphics
-            draw={(g: Graphics) => {
-              g.clear().roundRect(hintPosition.c * cellSize + 4, hintPosition.r * cellSize + 4, cellSize - 8, cellSize - 8, 14).stroke({ color: 0xffeb3b, width: 6, alpha: 1 });
-            }}
-          />
-        </pixiContainer>
+        <pixiGraphics draw={(g: Graphics) => {
+          g.clear().roundRect(hintPosition.c * cellSize + 4, hintPosition.r * cellSize + 4, cellSize - 8, cellSize - 8, 14).stroke({ color: 0xffeb3b, width: 6, alpha: 1 });
+        }} />
       )}
 
       {floatingPoints.map((p) => (
-        <pixiContainer key={p.id} x={(p.c + 0.5) * cellSize} y={(p.r + 0.3) * cellSize}>
-          <pixiText
-            ref={(node: Text) => { 
-              if (node) { 
-                node.text = `+${p.points}`;
-                node.anchor.set(0.5); 
-                node.style = new TextStyle({
-                  fontFamily: 'system-ui, sans-serif', fontSize: Math.floor(cellSize * 0.48), fontWeight: '900', fill: '#ffffff', stroke: { color: '#000000', width: 6 },
-                  dropShadow: { color: '#000000', alpha: 0.5, blur: 8, distance: 4 },
-                });
-              } 
-            }}
-          />
-        </pixiContainer>
+        <pixiText
+          key={p.id}
+          text={`+${p.points}`}
+          x={(p.c + 0.5) * cellSize}
+          y={(p.r + 0.3) * cellSize}
+          anchor={0.5}
+          style={new TextStyle({
+            fontFamily: 'system-ui, sans-serif', fontSize: Math.floor(cellSize * 0.48), fontWeight: '900', fill: '#ffffff', stroke: { color: '#000000', width: 6 },
+            dropShadow: { color: '#000000', alpha: 0.5, blur: 8, distance: 4 },
+          })}
+        />
       ))}
 
+      {/* Camada de Interação (Cliques) */}
       <pixiContainer>
         {board.map((row, r) => row.map((_, c) => (
           <pixiGraphics key={`${r}-${c}`} x={c * cellSize} y={r * cellSize} interactive={true} cursor="pointer" onPointerDown={() => onCellClick(r, c)}
