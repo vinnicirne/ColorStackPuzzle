@@ -164,7 +164,8 @@ const PixiBoard: React.FC<PixiBoardProps> = ({
       height={height}
       backgroundAlpha={0}
       antialias={true}
-      resolution={2} // Melhora nitidez mobile
+      resolution={1} // Reset para 1 evita o zoom 2x indesejado no mobile/browser
+      powerPreference="high-performance"
     >
       <pixiContainer {...({ isRenderGroup: true } as any)}>
         <pixiGraphics draw={drawBoard} />
