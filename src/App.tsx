@@ -16,7 +16,7 @@ import PixiBoard from './components/PixiBoard';
 // ─── CONFIGURAÇÕES TÉCNICAS E BALANCEAMENTO ───
 const GAME_CONFIG = {
   BOARD_SIZE: 8,
-  LEVEL_SCORE_INTERVAL: 480,       // Intervalo para subir de fase (Mais desafiador)
+  LEVEL_SCORE_INTERVAL: 1440,      // Intervalo para subir de fase (3x mais pontos para não subir rápido demais)
   JOKER_CHANCE: 0.11,
   RAINBOW_CHANCE: 0.09,
   GRAVITY_DELAY: 350,
@@ -728,7 +728,7 @@ export default function App() {
           await AdMob.initialize({ initializeForTesting: false });
           
           // Mostra o Banner de Produção no rodapé
-          // Pequeno delay para garantir que a UI nativa carregou e a WebView está pronta
+          // Delay maior para garantir que a UI nativa carregou totalmente em Androids lentos
           setTimeout(async () => {
             try {
               await AdMob.showBanner({
@@ -739,11 +739,10 @@ export default function App() {
                 adSize: BannerAdSize.ADAPTIVE_BANNER,
                 npa: false,
               });
-              // Em algumas versões do plugin, o redimensionamento é automático se o container permitir
             } catch (bannerErr) {
-              console.log('Banner lazy load fail:', bannerErr);
+              console.log('Banner fail:', bannerErr);
             }
-          }, 1500);
+          }, 2500);
 
           // PRE-LOAD & OPENING AD: Usa Intersticial como fallback (v8 plugin JS não tem App Open)
           try {
